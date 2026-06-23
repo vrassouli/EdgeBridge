@@ -1,6 +1,6 @@
 # Linux/Raspberry Pi Agent
 
-The MVP Agent has no GPIO dependency yet, so it can run on any Linux device supported by .NET 10. The same steps work for Raspberry Pi OS using the matching runtime identifier.
+The Agent can run with mock hardware on any Linux device supported by .NET 10, or with the `linux-gpio` backend for real GPIO on devices that expose Linux GPIO chips.
 
 ## Publish from Mac
 
@@ -35,6 +35,8 @@ scp packaging/systemd/edgebridge-agent.service pi@DEVICE_IP:/tmp/edgebridge-agen
 On the device:
 
 ```bash
+sudo apt update
+sudo apt install -y libgpiod-dev gpiod
 sudo useradd --system --home /opt/edgebridge --shell /usr/sbin/nologin edgebridge || true
 sudo mkdir -p /opt/edgebridge/agent /etc/edgebridge
 sudo cp -r /tmp/edgebridge-agent/* /opt/edgebridge/agent/
@@ -52,8 +54,80 @@ systemctl status edgebridge-agent
 journalctl -u edgebridge-agent -f
 ```
 
+When no `--config` argument is provided on Linux, the Agent first tries `/etc/edgebridge/agent.json`.
+If that file does not exist, it uses built-in development defaults.
+
 From your MacBook, run a sample against the device:
 
 ```bash
 dotnet run --project src/EdgeBridge.Samples.Console -- ws://DEVICE_IP:8080/edgebridge/ blink
 ```
+
+## Development Raspberry Pi
+
+The current development Raspberry Pi 4 is reachable at `rpi4-dev.local` with SSH user `me`.
+
+For development checks, do not install or run the Agent as a Raspberry Pi service. Publish the Agent from the Mac, copy the published files into `~/edgebridge-agent` on the Pi, place `agent.json` beside the binary, and run it directly from that directory:
+
+```bash
+dotnet publish src/EdgeBridge.Agent -c Release -r linux-arm64 --self-contained true -o publish/agent-linux-arm64
+rsync -az --delete publish/agent-linux-arm64/ me@rpi4-dev.local:~/edgebridge-agent/
+scp config/agent.example.json me@rpi4-dev.local:~/edgebridge-agent/agent.json
+ssh me@rpi4-dev.local 'cd ~/edgebridge-agent && ./EdgeBridge.Agent --config=agent.json'
+```
+
+Then verify client connectivity from the Mac:
+
+```bash
+dotnet run --project src/EdgeBridge.Samples.Console -- ws://rpi4-dev.local:8080/edgebridge/ blink
+```
+
+## Real GPIO backend
+
+To use physical GPIO lines, set the hardware backend in `/etc/edgebridge/agent.json`:
+
+```json
+{
+  "deviceId": "lab-device-01",
+  "deviceName": "Lab Device",
+  "hardware": {
+    "backend": "linux-gpio",
+    "gpioChip": 0,
+    "pwmChip": 0,
+    "pwmFrequency": 1000
+  },
+  "transports": {
+    "webSocket": {
+      "enabled": true,
+      "url": "http://0.0.0.0:8080/edgebridge/"
+    }
+  },
+  "modules": {
+    "gpio": true,
+    "pwm": true,
+    "camera": false
+  }
+}
+```
+
+The `linux-gpio` backend uses the libgpiod V2 ABI. On Raspberry Pi OS or Debian 13/trixie-based images, install the libgpiod development package and command-line inspection tool:
+
+```bash
+sudo apt update
+sudo apt install -y libgpiod-dev gpiod
+```
+
+Channel numbers are Linux GPIO line offsets on the configured GPIO chip. On many Raspberry Pi OS images, `gpioChip` 0 maps to `/dev/gpiochip0`; verify the line numbers for your board with:
+
+```bash
+gpioinfo
+```
+
+The service account must be allowed to access the GPIO chip devices. On Raspberry Pi OS this usually means adding it to the `gpio` group:
+
+```bash
+sudo usermod -aG gpio edgebridge
+sudo systemctl restart edgebridge-agent
+```
+
+If PWM is enabled, the backend uses Linux sysfs PWM through `pwmChip` and `pwmFrequency`. Disable `"pwm"` in `modules` if your board image does not expose PWM through sysfs yet.

@@ -2,7 +2,7 @@ using EdgeBridge.Abstractions;
 using EdgeBridge.Client;
 using EdgeBridge.Samples.Console;
 
-var endpoint = args.ElementAtOrDefault(0) ?? "ws://localhost:8080/edgebridge/";
+var endpoint = args.ElementAtOrDefault(0) ?? "ws://rpi4-dev.local:8080/edgebridge/";
 var sample = args.ElementAtOrDefault(1) ?? "blink";
 
 using var cancellation = new CancellationTokenSource();

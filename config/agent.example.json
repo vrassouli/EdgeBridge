@@ -1,6 +1,12 @@
 {
   "deviceId": "toy-car-01",
   "deviceName": "Toy Car",
+  "hardware": {
+    "backend": "mock",
+    "gpioChip": 0,
+    "pwmChip": 0,
+    "pwmFrequency": 1000
+  },
   "transports": {
     "webSocket": {
       "enabled": true,
@@ -13,4 +19,3 @@
     "camera": false
   }
 }
-

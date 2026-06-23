@@ -6,9 +6,29 @@ internal sealed record AgentConfig
 
     public string DeviceName { get; init; } = "EdgeBridge Development Device";
 
+    public HardwareConfig Hardware { get; init; } = new();
+
     public TransportConfig Transports { get; init; } = new();
 
     public ModuleConfig Modules { get; init; } = new();
+}
+
+internal sealed record HardwareConfig
+{
+    public string Backend { get; init; } = HardwareBackends.Mock;
+
+    public int GpioChip { get; init; } = 0;
+
+    public int PwmChip { get; init; } = 0;
+
+    public int PwmFrequency { get; init; } = 1000;
+}
+
+internal static class HardwareBackends
+{
+    public const string Mock = "mock";
+
+    public const string LinuxGpio = "linux-gpio";
 }
 
 internal sealed record TransportConfig
@@ -31,4 +51,3 @@ internal sealed record ModuleConfig
 
     public bool Camera { get; init; } = false;
 }
-

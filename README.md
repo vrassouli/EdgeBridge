@@ -6,7 +6,11 @@ The core idea is simple:
 
 > Application code should depend on `EdgeBridge.Abstractions`, not on Raspberry Pi, ESP32, Arduino, Jetson, GPIO libraries, transport details, or simulator internals.
 
+<<<<<<< HEAD
 That lets the same business/application code run against:
+=======
+The default implementation uses mock hardware so it can run on macOS immediately. The Agent can also use a `linux-gpio` hardware backend on Linux devices, including Raspberry Pi, without changing application-facing abstractions.
+>>>>>>> f15ddf4 (Implement Linux GPIO hardware backend and update documentation)
 
 - a local hardware implementation,
 - a remote device through an EdgeBridge Agent,
@@ -160,6 +164,12 @@ The Agent can load a JSON config file:
 {
   "deviceId": "toy-car-01",
   "deviceName": "Toy Car",
+  "hardware": {
+    "backend": "mock",
+    "gpioChip": 0,
+    "pwmChip": 0,
+    "pwmFrequency": 1000
+  },
   "transports": {
     "webSocket": {
       "enabled": true,
@@ -180,11 +190,23 @@ Run with:
 dotnet run --project src/EdgeBridge.Agent -- --config=agent.json
 ```
 
+<<<<<<< HEAD
 For a device on your network, clients should connect with the device IP:
 
 ```bash
 dotnet run --project src/EdgeBridge.Samples.Console -- ws://DEVICE_IP:8080/edgebridge/ blink
 ```
+=======
+When no `--config` argument is provided, the Agent first tries `/etc/edgebridge/agent.json`.
+If that file does not exist, it uses built-in development defaults.
+
+For remote clients, use `ws://device-ip:8080/edgebridge/`.
+
+Set `"hardware": { "backend": "linux-gpio" }` on a Linux device to use real GPIO lines behind `IDevice`. Channel numbers are Linux GPIO line offsets on the selected GPIO chip.
+The `linux-gpio` backend uses the native libgpiod V2 runtime; on Raspberry Pi OS/Debian 13 trixie, install it with `sudo apt install -y libgpiod-dev gpiod`.
+
+## Run on Linux/Raspberry Pi
+>>>>>>> f15ddf4 (Implement Linux GPIO hardware backend and update documentation)
 
 ---
 

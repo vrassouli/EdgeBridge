@@ -20,7 +20,21 @@ internal sealed class AgentWebSocketServer
 
     public async Task RunAsync(CancellationToken cancellationToken)
     {
-        _listener.Start();
+        var httpPrefix = ToHttpListenerPrefix(_listenUri);
+
+        try
+        {
+            _listener.Start();
+        }
+        catch (HttpListenerException ex)
+        {
+            throw new InvalidOperationException(
+                $"Could not start EdgeBridge Agent listener on {httpPrefix}. " +
+                "Another Agent or service may already be using this endpoint.",
+                ex);
+        }
+
+        Console.WriteLine($"EdgeBridge Agent HTTP prefix: {httpPrefix}");
         Console.WriteLine($"EdgeBridge Agent listening on {ToWebSocketUri(_listenUri)}");
 
         using var registration = cancellationToken.Register(() => _listener.Stop());
