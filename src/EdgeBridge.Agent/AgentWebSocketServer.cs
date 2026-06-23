@@ -154,12 +154,15 @@ internal sealed class AgentWebSocketServer
         }
         catch (Exception ex)
         {
+            Console.WriteLine($"Command '{request.Command}' failed: {ex.GetType().Name}: {ex.Message}");
+
             await connection.SendAsync(new CommandResponse
             {
                 Type = MessageTypes.CommandResponse,
                 DeviceId = _device.DeviceId,
                 CorrelationId = request.MessageId,
                 Success = false,
+                Payload = ProtocolJson.ToJsonElement(new { }),
                 Error = new EdgeBridgeError("command_failed", ex.Message)
             }, cancellationToken).ConfigureAwait(false);
         }

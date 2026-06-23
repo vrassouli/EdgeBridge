@@ -51,6 +51,7 @@ Implemented now:
 - remote client SDK,
 - provisioning contracts,
 - console samples,
+- cross-platform Avalonia GUI sample for RGB LED toggle control,
 - Linux install notes and systemd packaging.
 
 Not implemented yet:
@@ -90,7 +91,8 @@ See [`TODO.md`](TODO.md) for the active roadmap.
     ├── EdgeBridge.Agent/
     ├── EdgeBridge.Client/
     ├── EdgeBridge.Provisioning/
-    └── EdgeBridge.Samples.Console/
+    ├── EdgeBridge.Samples.Console/
+    └── EdgeBridge.Samples.Avalonia/
 ```
 
 ### Projects
@@ -104,6 +106,7 @@ See [`TODO.md`](TODO.md) for the active roadmap.
 | `EdgeBridge.Client` | Remote proxy implementation that exposes `IDevice` over a transport connection. |
 | `EdgeBridge.Provisioning` | Contracts for future device setup/provisioning flows such as WiFi/Bluetooth onboarding. |
 | `EdgeBridge.Samples.Console` | Console samples for blinking, button watching, and toy-car control. |
+| `EdgeBridge.Samples.Avalonia` | Cross-platform desktop GUI sample for toggling RGB LED GPIO channels. |
 
 ---
 
@@ -164,6 +167,22 @@ dotnet run --project src/EdgeBridge.Samples.Console -- ws://localhost:8080/edgeb
 dotnet run --project src/EdgeBridge.Samples.Console -- ws://localhost:8080/edgebridge/ button
 dotnet run --project src/EdgeBridge.Samples.Console -- ws://localhost:8080/edgebridge/ toy-car
 ```
+
+### Avalonia RGB LED sample
+
+The Avalonia desktop sample connects to an EdgeBridge Agent and toggles an RGB LED through three `IDigitalOutput` channels.
+
+```bash
+dotnet run --project src/EdgeBridge.Samples.Avalonia
+```
+
+The default endpoint is:
+
+```text
+ws://localhost:8080/edgebridge/
+```
+
+The default GPIO channel mapping is red `17`, green `27`, and blue `22`. Change the channel fields in the UI before connecting if your device uses different GPIO line offsets.
 
 ---
 

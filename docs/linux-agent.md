@@ -130,4 +130,6 @@ sudo usermod -aG gpio edgebridge
 sudo systemctl restart edgebridge-agent
 ```
 
-If PWM is enabled, the backend uses Linux sysfs PWM through `pwmChip` and `pwmFrequency`. Disable `"pwm"` in `modules` if your board image does not expose PWM through sysfs yet.
+The Avalonia RGB LED sample toggles LED channels through `IDigitalOutput`, so it does not require Linux PWM support.
+
+If PWM is enabled, the backend uses Linux sysfs PWM through `pwmChip` and `pwmFrequency`. Raspberry Pi OS does not always expose `/sys/class/pwm/pwmchip0` by default. On Raspberry Pi OS Bookworm, hardware PWM is configured through `/boot/firmware/config.txt`; older images may use `/boot/config.txt`. For example, `dtoverlay=pwm-2chan` exposes hardware PWM on GPIO 18 and 19 after a reboot. Use `ls /sys/class/pwm` to find the enabled PWM chip number, then set `hardware.pwmChip` to match. Disable `"pwm"` in `modules` if your board image does not expose PWM through sysfs yet.
