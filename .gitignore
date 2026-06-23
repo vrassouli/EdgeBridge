@@ -1,0 +1,15 @@
+bin/
+obj/
+publish/
+artifacts/
+TestResults/
+*.trx
+*.coverage
+*.coveragexml
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+.DS_Store
+Thumbs.db

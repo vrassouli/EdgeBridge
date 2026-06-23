@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/EdgeBridge.Abstractions/EdgeBridge.Abstractions.csproj" />
+    <Project Path="src/EdgeBridge.Agent/EdgeBridge.Agent.csproj" />
+    <Project Path="src/EdgeBridge.Client/EdgeBridge.Client.csproj" />
+    <Project Path="src/EdgeBridge.Protocol/EdgeBridge.Protocol.csproj" />
+    <Project Path="src/EdgeBridge.Provisioning/EdgeBridge.Provisioning.csproj" />
+    <Project Path="src/EdgeBridge.Samples.Console/EdgeBridge.Samples.Console.csproj" />
+    <Project Path="src/EdgeBridge.Transport.WebSockets/EdgeBridge.Transport.WebSockets.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,16 @@
+{
+  "deviceId": "toy-car-01",
+  "deviceName": "Toy Car",
+  "transports": {
+    "webSocket": {
+      "enabled": true,
+      "url": "http://0.0.0.0:8080/edgebridge/"
+    }
+  },
+  "modules": {
+    "gpio": true,
+    "pwm": true,
+    "camera": false
+  }
+}
+

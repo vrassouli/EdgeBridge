@@ -1,0 +1,17 @@
+[Unit]
+Description=EdgeBridge Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/edgebridge/agent
+ExecStart=/opt/edgebridge/agent/EdgeBridge.Agent --config=/etc/edgebridge/agent.json
+Restart=always
+RestartSec=5
+User=edgebridge
+Group=edgebridge
+
+[Install]
+WantedBy=multi-user.target
+
