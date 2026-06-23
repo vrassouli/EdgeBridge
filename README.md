@@ -6,17 +6,13 @@ The core idea is simple:
 
 > Application code should depend on `EdgeBridge.Abstractions`, not on Raspberry Pi, ESP32, Arduino, Jetson, GPIO libraries, transport details, or simulator internals.
 
-<<<<<<< HEAD
 That lets the same business/application code run against:
-=======
-The default implementation uses mock hardware so it can run on macOS immediately. The Agent can also use a `linux-gpio` hardware backend on Linux devices, including Raspberry Pi, without changing application-facing abstractions.
->>>>>>> f15ddf4 (Implement Linux GPIO hardware backend and update documentation)
 
 - a local hardware implementation,
 - a remote device through an EdgeBridge Agent,
 - or a simulator/mock device during development and testing.
 
-The current MVP is mock-first, so it runs immediately on macOS, Linux, and Raspberry Pi without native GPIO dependencies.
+The default implementation uses mock hardware so it can run on macOS immediately. The Agent can also use a `linux-gpio` hardware backend on Linux devices, including Raspberry Pi, without changing application-facing abstractions.
 
 ---
 
@@ -32,9 +28,10 @@ EdgeBridge tries to avoid that by separating:
 This makes it easier to:
 
 - develop from a Mac or PC while the hardware is somewhere else,
-- run samples before real GPIO support is ready,
+- run samples with mock hardware before wiring real hardware,
+- use real GPIO on Linux/Raspberry Pi when available,
 - swap transports without changing public APIs,
-- add Raspberry Pi, ESP32, Arduino, Jetson, camera, and sensor providers later,
+- add ESP32, Arduino, Jetson, camera, and sensor providers later,
 - teach robotics or hardware programming with less setup friction.
 
 ---
@@ -50,13 +47,14 @@ Implemented now:
 - WebSocket transport,
 - Linux/Raspberry Pi-ready Agent skeleton,
 - mock hardware provider,
+- Linux GPIO hardware backend,
 - remote client SDK,
 - provisioning contracts,
-- console samples.
+- console samples,
+- Linux install notes and systemd packaging.
 
 Not implemented yet:
 
-- real Linux GPIO provider,
 - authentication/authorization for WebSocket transport,
 - reconnect and health reporting in the client SDK,
 - real WiFi/Bluetooth provisioning flows,
@@ -75,10 +73,16 @@ See [`TODO.md`](TODO.md) for the active roadmap.
 ├── README.md
 ├── TODO.md
 ├── AGENTS.md
+├── config/
+│   └── agent.example.json
 ├── docs/
 │   ├── linux-agent.md
 │   └── adr/
-│       └── 0001-mvp-architecture.md
+│       ├── 0001-mvp-architecture.md
+│       └── 0002-linux-gpio-hardware-backend.md
+├── packaging/
+│   └── systemd/
+│       └── edgebridge-agent.service
 └── src/
     ├── EdgeBridge.Abstractions/
     ├── EdgeBridge.Protocol/
@@ -96,7 +100,7 @@ See [`TODO.md`](TODO.md) for the active roadmap.
 | `EdgeBridge.Abstractions` | Public application-facing hardware interfaces and shared device models. |
 | `EdgeBridge.Protocol` | Versioned JSON protocol messages, command payloads, errors, and serialization options. |
 | `EdgeBridge.Transport.WebSockets` | Replaceable transport contracts plus the current WebSocket implementation. |
-| `EdgeBridge.Agent` | Device-side runtime/daemon skeleton. Currently hosts mock hardware. |
+| `EdgeBridge.Agent` | Device-side runtime/daemon. Hosts the selected hardware backend, currently `mock` or `linux-gpio`. |
 | `EdgeBridge.Client` | Remote proxy implementation that exposes `IDevice` over a transport connection. |
 | `EdgeBridge.Provisioning` | Contracts for future device setup/provisioning flows such as WiFi/Bluetooth onboarding. |
 | `EdgeBridge.Samples.Console` | Console samples for blinking, button watching, and toy-car control. |
@@ -108,7 +112,14 @@ See [`TODO.md`](TODO.md) for the active roadmap.
 - .NET 10 SDK
 - macOS, Linux, or Raspberry Pi OS
 
-The MVP has no native GPIO dependency, so the Agent can currently run anywhere supported by .NET 10.
+For mock hardware, no native GPIO dependency is required.
+
+For the `linux-gpio` backend on Raspberry Pi OS/Debian 13 trixie-based images, install:
+
+```bash
+sudo apt update
+sudo apt install -y libgpiod-dev gpiod
+```
 
 ---
 
@@ -184,29 +195,42 @@ The Agent can load a JSON config file:
 }
 ```
 
-Run with:
+Run with an explicit config file:
 
 ```bash
 dotnet run --project src/EdgeBridge.Agent -- --config=agent.json
 ```
 
-<<<<<<< HEAD
-For a device on your network, clients should connect with the device IP:
+When no `--config` argument is provided, the Agent first tries:
+
+```text
+/etc/edgebridge/agent.json
+```
+
+If that file does not exist, it uses built-in development defaults.
+
+For a device on your network, clients should connect with the device IP or hostname:
 
 ```bash
 dotnet run --project src/EdgeBridge.Samples.Console -- ws://DEVICE_IP:8080/edgebridge/ blink
 ```
-=======
-When no `--config` argument is provided, the Agent first tries `/etc/edgebridge/agent.json`.
-If that file does not exist, it uses built-in development defaults.
 
-For remote clients, use `ws://device-ip:8080/edgebridge/`.
+### Real GPIO backend
 
-Set `"hardware": { "backend": "linux-gpio" }` on a Linux device to use real GPIO lines behind `IDevice`. Channel numbers are Linux GPIO line offsets on the selected GPIO chip.
-The `linux-gpio` backend uses the native libgpiod V2 runtime; on Raspberry Pi OS/Debian 13 trixie, install it with `sudo apt install -y libgpiod-dev gpiod`.
+Set the hardware backend to `linux-gpio` on a Linux device to use real GPIO lines behind `IDevice`:
 
-## Run on Linux/Raspberry Pi
->>>>>>> f15ddf4 (Implement Linux GPIO hardware backend and update documentation)
+```json
+{
+  "hardware": {
+    "backend": "linux-gpio",
+    "gpioChip": 0,
+    "pwmChip": 0,
+    "pwmFrequency": 1000
+  }
+}
+```
+
+Channel numbers are Linux GPIO line offsets on the selected GPIO chip, not Raspberry Pi board-specific pin names. Use `gpioinfo` on the target device to inspect available GPIO chips and line offsets.
 
 ---
 
@@ -226,7 +250,7 @@ await Task.Delay(500);
 await led.SetAsync(false);
 ```
 
-The important part is that application code uses `EdgeBridge.Abstractions`. The implementation can later be local hardware, a remote Agent, or a simulator.
+The important part is that application code uses `EdgeBridge.Abstractions`. The implementation can be local hardware, a remote Agent, or a simulator.
 
 ---
 
@@ -285,7 +309,7 @@ For generic x64 Linux:
 dotnet publish src/EdgeBridge.Agent -c Release -r linux-x64 --self-contained true -o publish/agent-linux-x64
 ```
 
-See [`docs/linux-agent.md`](docs/linux-agent.md) for copy, install, and `systemd` instructions.
+See [`docs/linux-agent.md`](docs/linux-agent.md) for copy, install, direct development runs, real GPIO setup, and `systemd` instructions.
 
 ---
 
@@ -303,7 +327,10 @@ EdgeBridge follows these rules:
 - Names avoid board-specific terminology.
 - The design should support Raspberry Pi, ESP32, Arduino, Jetson, simulators, and future devices.
 
-For the first accepted architecture decision, see [`docs/adr/0001-mvp-architecture.md`](docs/adr/0001-mvp-architecture.md).
+Accepted architecture decisions:
+
+- [`ADR 0001: MVP Architecture`](docs/adr/0001-mvp-architecture.md)
+- [`ADR 0002: Linux GPIO Hardware Backend`](docs/adr/0002-linux-gpio-hardware-backend.md)
 
 ---
 
@@ -337,8 +364,6 @@ Near-term work:
 
 - add tests for protocol serialization, command correlation, and mock device behavior,
 - add graceful unsubscribe support for watch streams,
-- add a real Linux GPIO implementation behind `IDevice`,
-- add Linux `systemd` packaging,
 - add WebSocket authentication and authorization,
 - add reconnect policy and connection health reporting,
 - implement WiFi/Bluetooth provisioning,
