@@ -9,4 +9,7 @@
     <Project Path="src/EdgeBridge.Samples.Console/EdgeBridge.Samples.Console.csproj" />
     <Project Path="src/EdgeBridge.Transport.WebSockets/EdgeBridge.Transport.WebSockets.csproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/EdgeBridge.Tests/EdgeBridge.Tests.csproj" />
+  </Folder>
 </Solution>

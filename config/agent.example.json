@@ -5,7 +5,21 @@
     "backend": "mock",
     "gpioChip": 0,
     "pwmChip": 0,
-    "pwmFrequency": 1000
+    "pwmFrequency": 1000,
+    "motors": {
+      "left": {
+        "pwmChannel": 0,
+        "directionChannel": 23,
+        "invertDirection": false,
+        "maxDutyCycle": 1.0
+      },
+      "right": {
+        "pwmChannel": 1,
+        "directionChannel": 24,
+        "invertDirection": true,
+        "maxDutyCycle": 1.0
+      }
+    }
   },
   "transports": {
     "webSocket": {

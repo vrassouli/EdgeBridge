@@ -4,6 +4,9 @@ using EdgeBridge.Samples.Console;
 
 var endpoint = args.ElementAtOrDefault(0) ?? "ws://rpi4-dev.local:8080/edgebridge/";
 var sample = args.ElementAtOrDefault(1) ?? "blink";
+var channel = int.TryParse(args.ElementAtOrDefault(2), out var parsedChannel)
+    ? parsedChannel
+    : 0;
 
 using var cancellation = new CancellationTokenSource();
 Console.CancelKeyPress += (_, eventArgs) =>
@@ -26,11 +29,14 @@ try
         case "button":
             await WatchButtonAsync(device, cancellation.Token).ConfigureAwait(false);
             break;
+        case "fade":
+            await FadeLedAsync(device, channel, cancellation.Token).ConfigureAwait(false);
+            break;
         case "toy-car":
             await DriveToyCarAsync(device, cancellation.Token).ConfigureAwait(false);
             break;
         default:
-            Console.WriteLine("Samples: blink, button, toy-car");
+            Console.WriteLine("Samples: blink, button, fade, toy-car");
             break;
     }
 }
@@ -69,6 +75,40 @@ static async Task WatchButtonAsync(IDevice device, CancellationToken cancellatio
     {
         Console.WriteLine($"Button {state.Channel.Number}: {state.IsHigh} at {state.Timestamp:O}");
     }
+}
+
+static async Task FadeLedAsync(IDevice device, int channel, CancellationToken cancellationToken)
+{
+    var led = device.PwmOutput(channel);
+
+    try
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            for (var step = 0; step <= 100; step += 5)
+            {
+                await SetLedBrightnessAsync(led, step, cancellationToken).ConfigureAwait(false);
+            }
+
+            for (var step = 95; step >= 0; step -= 5)
+            {
+                await SetLedBrightnessAsync(led, step, cancellationToken).ConfigureAwait(false);
+            }
+        }
+    }
+    finally
+    {
+        await led.SetDutyCycleAsync(0, CancellationToken.None).ConfigureAwait(false);
+    }
+}
+
+static async Task SetLedBrightnessAsync(IPwmOutput led, int percent, CancellationToken cancellationToken)
+{
+    var dutyCycle = percent / 100.0;
+
+    await led.SetDutyCycleAsync(dutyCycle, cancellationToken).ConfigureAwait(false);
+    Console.WriteLine($"PWM {led.Channel.Number}: {percent}%");
+    await Task.Delay(50, cancellationToken).ConfigureAwait(false);
 }
 
 static async Task DriveToyCarAsync(IDevice device, CancellationToken cancellationToken)

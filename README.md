@@ -48,19 +48,21 @@ Implemented now:
 - Linux/Raspberry Pi-ready Agent skeleton,
 - mock hardware provider,
 - Linux GPIO hardware backend,
+- configuration-driven Linux GPIO/PWM motor mapping,
 - remote client SDK,
+- client connection health reporting and explicit reconnect support,
 - provisioning contracts,
 - console samples,
 - cross-platform Avalonia GUI sample for RGB LED toggle control,
-- Linux install notes and systemd packaging.
+- Linux install notes and systemd packaging,
+- lightweight test harness covering protocol serialization, command correlation, mock behavior, watch unsubscribe behavior, and client health/reconnect behavior.
 
 Not implemented yet:
 
 - authentication/authorization for WebSocket transport,
-- reconnect and health reporting in the client SDK,
 - real WiFi/Bluetooth provisioning flows,
 - camera stream transport,
-- full test coverage.
+- full client-agent integration coverage against a real WebSocket listener.
 
 See [`TODO.md`](TODO.md) for the active roadmap.
 
@@ -165,7 +167,14 @@ Available samples:
 ```bash
 dotnet run --project src/EdgeBridge.Samples.Console -- ws://localhost:8080/edgebridge/ blink
 dotnet run --project src/EdgeBridge.Samples.Console -- ws://localhost:8080/edgebridge/ button
+dotnet run --project src/EdgeBridge.Samples.Console -- ws://localhost:8080/edgebridge/ fade
 dotnet run --project src/EdgeBridge.Samples.Console -- ws://localhost:8080/edgebridge/ toy-car
+```
+
+The `fade` sample drives an LED through `IPwmOutput` and fades duty cycle up and down on PWM channel `0` by default. Pass a channel number after the sample name to use a different PWM channel:
+
+```bash
+dotnet run --project src/EdgeBridge.Samples.Console -- ws://localhost:8080/edgebridge/ fade 1
 ```
 
 ### Avalonia RGB LED sample
@@ -198,7 +207,15 @@ The Agent can load a JSON config file:
     "backend": "mock",
     "gpioChip": 0,
     "pwmChip": 0,
-    "pwmFrequency": 1000
+    "pwmFrequency": 1000,
+    "motors": {
+      "left": {
+        "pwmChannel": 0,
+        "directionChannel": 23,
+        "invertDirection": false,
+        "maxDutyCycle": 1.0
+      }
+    }
   },
   "transports": {
     "webSocket": {
@@ -250,6 +267,35 @@ Set the hardware backend to `linux-gpio` on a Linux device to use real GPIO line
 ```
 
 Channel numbers are Linux GPIO line offsets on the selected GPIO chip, not Raspberry Pi board-specific pin names. Use `gpioinfo` on the target device to inspect available GPIO chips and line offsets.
+
+Named motors can be mapped in Agent configuration without changing application code. Each motor maps to a PWM channel and can optionally use a direction GPIO channel:
+
+```json
+{
+  "hardware": {
+    "backend": "linux-gpio",
+    "gpioChip": 0,
+    "pwmChip": 0,
+    "pwmFrequency": 1000,
+    "motors": {
+      "left": {
+        "pwmChannel": 0,
+        "directionChannel": 23,
+        "invertDirection": false,
+        "maxDutyCycle": 1.0
+      },
+      "right": {
+        "pwmChannel": 1,
+        "directionChannel": 24,
+        "invertDirection": true,
+        "maxDutyCycle": 0.85
+      }
+    }
+  }
+}
+```
+
+Negative motor speeds require a configured `directionChannel`. If no direction channel is configured, the motor can only run forward or stop.
 
 ---
 
@@ -371,6 +417,7 @@ Run a sample:
 
 ```bash
 dotnet run --project src/EdgeBridge.Samples.Console -- ws://localhost:8080/edgebridge/ blink
+dotnet run --project src/EdgeBridge.Samples.Console -- ws://localhost:8080/edgebridge/ fade
 ```
 
 Stop long-running samples with `Ctrl+C`.
@@ -381,12 +428,10 @@ Stop long-running samples with `Ctrl+C`.
 
 Near-term work:
 
-- add tests for protocol serialization, command correlation, and mock device behavior,
-- add graceful unsubscribe support for watch streams,
 - add WebSocket authentication and authorization,
-- add reconnect policy and connection health reporting,
 - implement WiFi/Bluetooth provisioning,
 - add camera stream protocol and transport support,
+- expand client-agent integration tests against a real WebSocket listener,
 - add more ADRs for protocol versioning, transport replacement, and hardware provider model.
 
 ---

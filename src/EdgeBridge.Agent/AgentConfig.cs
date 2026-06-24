@@ -22,6 +22,19 @@ internal sealed record HardwareConfig
     public int PwmChip { get; init; } = 0;
 
     public int PwmFrequency { get; init; } = 1000;
+
+    public Dictionary<string, MotorMappingConfig> Motors { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+}
+
+internal sealed record MotorMappingConfig
+{
+    public int PwmChannel { get; init; }
+
+    public int? DirectionChannel { get; init; }
+
+    public bool InvertDirection { get; init; }
+
+    public double MaxDutyCycle { get; init; } = 1;
 }
 
 internal static class HardwareBackends

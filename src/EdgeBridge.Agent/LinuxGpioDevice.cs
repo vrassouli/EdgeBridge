@@ -37,6 +37,11 @@ internal sealed class LinuxGpioDevice : IDevice, IDisposable
             capabilities.Add("pwm");
         }
 
+        if (_config.Hardware.Motors.Count > 0)
+        {
+            capabilities.Add("motor");
+        }
+
         return ValueTask.FromResult(new DeviceInfo(
             DeviceId,
             _config.DeviceName,
@@ -50,7 +55,15 @@ internal sealed class LinuxGpioDevice : IDevice, IDisposable
 
     public IPwmOutput PwmOutput(int channel) => new LinuxPwmOutput(this, channel);
 
-    public IMotor Motor(string name) => new UnsupportedMotor(name);
+    public IMotor Motor(string name)
+    {
+        if (!_config.Hardware.Motors.TryGetValue(name, out var mapping))
+        {
+            return new UnsupportedMotor(name);
+        }
+
+        return new LinuxMappedMotor(this, name, mapping);
+    }
 
     public void Dispose()
     {
@@ -158,6 +171,37 @@ internal sealed class LinuxGpioDevice : IDevice, IDisposable
         }
 
         return ValueTask.CompletedTask;
+    }
+
+    internal async ValueTask SetMotorSpeedAsync(
+        string name,
+        MotorMappingConfig mapping,
+        double speed,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var clampedSpeed = Math.Clamp(speed, -1, 1);
+        var dutyCycle = Math.Abs(clampedSpeed) * Math.Clamp(mapping.MaxDutyCycle, 0, 1);
+
+        if (clampedSpeed < 0 && mapping.DirectionChannel is null)
+        {
+            throw new NotSupportedException(
+                $"Motor '{name}' does not have a direction channel and cannot run in reverse.");
+        }
+
+        if (mapping.DirectionChannel is int directionChannel)
+        {
+            var directionHigh = clampedSpeed < 0;
+            if (mapping.InvertDirection)
+            {
+                directionHigh = !directionHigh;
+            }
+
+            await SetDigitalOutputAsync(directionChannel, directionHigh, cancellationToken).ConfigureAwait(false);
+        }
+
+        await SetPwmAsync(mapping.PwmChannel, dutyCycle, cancellationToken).ConfigureAwait(false);
     }
 
     private IoPwmChannel CreatePwmChannel(int channel)
@@ -298,5 +342,30 @@ internal sealed class UnsupportedMotor : IMotor
     {
         cancellationToken.ThrowIfCancellationRequested();
         return ValueTask.CompletedTask;
+    }
+}
+
+internal sealed class LinuxMappedMotor : IMotor
+{
+    private readonly LinuxGpioDevice _device;
+    private readonly MotorMappingConfig _mapping;
+
+    public LinuxMappedMotor(LinuxGpioDevice device, string name, MotorMappingConfig mapping)
+    {
+        _device = device;
+        _mapping = mapping;
+        Channel = new MotorChannel(name);
+    }
+
+    public MotorChannel Channel { get; }
+
+    public ValueTask SetSpeedAsync(double speed, CancellationToken cancellationToken = default)
+    {
+        return _device.SetMotorSpeedAsync(Channel.Name, _mapping, speed, cancellationToken);
+    }
+
+    public ValueTask StopAsync(CancellationToken cancellationToken = default)
+    {
+        return SetSpeedAsync(0, cancellationToken);
     }
 }

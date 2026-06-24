@@ -13,10 +13,8 @@ public static class EdgeDevice
     public static async ValueTask<IDevice> ConnectAsync(Uri endpoint, CancellationToken cancellationToken = default)
     {
         var transport = new WebSocketTransport();
-        var connection = await transport.ConnectAsync(endpoint, cancellationToken).ConfigureAwait(false);
-        var device = new RemoteDevice(connection);
+        var device = new RemoteDevice(endpoint, transport);
         await device.StartAsync(cancellationToken).ConfigureAwait(false);
         return device;
     }
 }
-

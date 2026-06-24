@@ -6,26 +6,50 @@ using EdgeBridge.Transport.WebSockets;
 
 namespace EdgeBridge.Client;
 
-internal sealed class RemoteDevice : IDevice, IAsyncDisposable
+internal sealed class RemoteDevice : IDevice, IRemoteDeviceConnection, IAsyncDisposable
 {
-    private readonly ITransportConnection _connection;
+    private static readonly TimeSpan[] ReconnectDelays =
+    [
+        TimeSpan.FromMilliseconds(250),
+        TimeSpan.FromMilliseconds(500),
+        TimeSpan.FromSeconds(1),
+        TimeSpan.FromSeconds(2),
+        TimeSpan.FromSeconds(5)
+    ];
+
+    private readonly Uri _endpoint;
+    private readonly ITransport _transport;
+    private readonly SemaphoreSlim _connectionLock = new(1, 1);
     private readonly ConcurrentDictionary<string, TaskCompletionSource<CommandResponse>> _pending = new();
     private readonly ConcurrentDictionary<string, Channel<DigitalInputState>> _digitalWatchers = new();
     private readonly CancellationTokenSource _disposeCts = new();
+    private ITransportConnection? _connection;
+    private CancellationTokenSource? _receiveCts;
     private Task? _receiveTask;
+    private bool _disposed;
 
-    public RemoteDevice(ITransportConnection connection)
+    public RemoteDevice(Uri endpoint, ITransport transport)
     {
-        _connection = connection;
+        _endpoint = endpoint;
+        _transport = transport;
     }
 
     public string DeviceId { get; private set; } = "remote";
 
+    public EdgeConnectionHealth Health { get; private set; } = new(EdgeConnectionState.Closed);
+
+    public event EventHandler<EdgeConnectionHealth>? HealthChanged;
+
     public async ValueTask StartAsync(CancellationToken cancellationToken = default)
     {
-        _receiveTask = Task.Run(() => ReceiveLoopAsync(_disposeCts.Token), CancellationToken.None);
+        await ConnectTransportAsync(EdgeConnectionState.Connecting, cancellationToken).ConfigureAwait(false);
         var info = await GetInfoAsync(cancellationToken).ConfigureAwait(false);
         DeviceId = info.DeviceId;
+    }
+
+    public ValueTask ReconnectAsync(CancellationToken cancellationToken = default)
+    {
+        return ConnectTransportAsync(EdgeConnectionState.Reconnecting, cancellationToken);
     }
 
     public async ValueTask<DeviceInfo> GetInfoAsync(CancellationToken cancellationToken = default)
@@ -67,8 +91,9 @@ internal sealed class RemoteDevice : IDevice, IAsyncDisposable
         int channel,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        var subscriptionId = $"digital:{channel}";
-        var watcher = _digitalWatchers.GetOrAdd(subscriptionId, _ => Channel.CreateUnbounded<DigitalInputState>());
+        var subscriptionId = $"digital:{channel}:{Guid.NewGuid():n}";
+        var watcher = Channel.CreateUnbounded<DigitalInputState>();
+        _digitalWatchers[subscriptionId] = watcher;
 
         var request = new SubscribeRequest
         {
@@ -79,11 +104,33 @@ internal sealed class RemoteDevice : IDevice, IAsyncDisposable
             CorrelationId = subscriptionId
         };
 
-        await _connection.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        await SendMessageAsync(request, cancellationToken).ConfigureAwait(false);
 
-        await foreach (var state in watcher.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+        try
         {
-            yield return state;
+            await foreach (var state in watcher.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+            {
+                yield return state;
+            }
+        }
+        finally
+        {
+            _digitalWatchers.TryRemove(subscriptionId, out _);
+            watcher.Writer.TryComplete();
+
+            try
+            {
+                await SendMessageAsync(new UnsubscribeRequest
+                {
+                    Type = MessageTypes.UnsubscribeRequest,
+                    DeviceId = DeviceId,
+                    SubscriptionId = subscriptionId
+                }, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch
+            {
+                // The connection may already be gone; remote cleanup also happens on disconnect.
+            }
         }
     }
 
@@ -95,6 +142,61 @@ internal sealed class RemoteDevice : IDevice, IAsyncDisposable
     internal ValueTask SetMotorSpeedAsync(string name, double speed, CancellationToken cancellationToken)
     {
         return SendCommandWithoutResultAsync(EdgeBridgeCommands.MotorSetSpeed, new MotorSetSpeedPayload(name, speed), cancellationToken);
+    }
+
+    private async ValueTask ConnectTransportAsync(EdgeConnectionState connectingState, CancellationToken cancellationToken)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        await _connectionLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            SetHealth(connectingState);
+
+            _receiveCts?.Cancel();
+
+            if (_connection is not null)
+            {
+                await _connection.DisposeAsync().ConfigureAwait(false);
+            }
+
+            _receiveCts?.Dispose();
+            _connection = await _transport.ConnectAsync(_endpoint, cancellationToken).ConfigureAwait(false);
+            _receiveCts = CancellationTokenSource.CreateLinkedTokenSource(_disposeCts.Token);
+            _receiveTask = Task.Run(() => ReceiveLoopAsync(_connection, _receiveCts.Token), CancellationToken.None);
+            SetHealth(EdgeConnectionState.Connected);
+        }
+        catch (Exception ex)
+        {
+            SetHealth(EdgeConnectionState.Faulted, ex.Message);
+            throw;
+        }
+        finally
+        {
+            _connectionLock.Release();
+        }
+    }
+
+    private async Task ReconnectLoopAsync()
+    {
+        for (var attempt = 0; attempt < ReconnectDelays.Length && !_disposeCts.IsCancellationRequested; attempt++)
+        {
+            try
+            {
+                SetHealth(EdgeConnectionState.Reconnecting);
+                await Task.Delay(ReconnectDelays[attempt], _disposeCts.Token).ConfigureAwait(false);
+                await ConnectTransportAsync(EdgeConnectionState.Reconnecting, _disposeCts.Token).ConfigureAwait(false);
+                return;
+            }
+            catch (OperationCanceledException) when (_disposeCts.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (Exception ex)
+            {
+                SetHealth(EdgeConnectionState.Faulted, ex.Message);
+            }
+        }
     }
 
     private async ValueTask SendCommandWithoutResultAsync<TPayload>(
@@ -121,25 +223,43 @@ internal sealed class RemoteDevice : IDevice, IAsyncDisposable
         var pending = new TaskCompletionSource<CommandResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
         _pending[request.MessageId] = pending;
 
-        await _connection.SendAsync(request, cancellationToken).ConfigureAwait(false);
-
-        await using var registration = cancellationToken.Register(() => pending.TrySetCanceled(cancellationToken));
-        var response = await pending.Task.ConfigureAwait(false);
-
-        if (!response.Success)
+        try
         {
-            throw new InvalidOperationException(response.Error?.Message ?? "EdgeBridge command failed.");
-        }
+            await SendMessageAsync(request, cancellationToken).ConfigureAwait(false);
 
-        return response;
+            await using var registration = cancellationToken.Register(() => pending.TrySetCanceled(cancellationToken));
+            var response = await pending.Task.ConfigureAwait(false);
+
+            if (!response.Success)
+            {
+                throw new InvalidOperationException(response.Error?.Message ?? "EdgeBridge command failed.");
+            }
+
+            return response;
+        }
+        catch
+        {
+            _pending.TryRemove(request.MessageId, out _);
+            throw;
+        }
     }
 
-    private async Task ReceiveLoopAsync(CancellationToken cancellationToken)
+    private async ValueTask SendMessageAsync(ProtocolMessage message, CancellationToken cancellationToken)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        var connection = _connection ?? throw new InvalidOperationException("EdgeBridge device is not connected.");
+        await connection.SendAsync(message, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task ReceiveLoopAsync(ITransportConnection connection, CancellationToken cancellationToken)
     {
         try
         {
-            await foreach (var message in _connection.ReceiveAsync(cancellationToken).ConfigureAwait(false))
+            await foreach (var message in connection.ReceiveAsync(cancellationToken).ConfigureAwait(false))
             {
+                RecordReceivedMessage(message);
+
                 switch (message)
                 {
                     case CommandResponse response when response.CorrelationId is not null:
@@ -153,17 +273,36 @@ internal sealed class RemoteDevice : IDevice, IAsyncDisposable
                         break;
                 }
             }
+
+            if (!_disposed && !cancellationToken.IsCancellationRequested)
+            {
+                SetHealth(EdgeConnectionState.Faulted, "Connection closed.");
+                FailPendingCommands(new IOException("EdgeBridge connection closed."));
+                await ReconnectLoopAsync().ConfigureAwait(false);
+            }
         }
         catch (OperationCanceledException)
         {
         }
         catch (Exception ex)
         {
-            foreach (var pending in _pending.Values)
+            FailPendingCommands(ex);
+            SetHealth(EdgeConnectionState.Faulted, ex.Message);
+
+            if (!_disposed && !cancellationToken.IsCancellationRequested)
             {
-                pending.TrySetException(ex);
+                await ReconnectLoopAsync().ConfigureAwait(false);
             }
         }
+    }
+
+    private void RecordReceivedMessage(ProtocolMessage message)
+    {
+        var lastHeartbeat = message is HeartbeatMessage
+            ? DateTimeOffset.UtcNow
+            : Health.LastHeartbeatAt;
+
+        SetHealth(EdgeConnectionState.Connected, lastMessageAt: DateTimeOffset.UtcNow, lastHeartbeatAt: lastHeartbeat);
     }
 
     private void DispatchDigitalInputEvent(EventMessage eventMessage)
@@ -186,9 +325,36 @@ internal sealed class RemoteDevice : IDevice, IAsyncDisposable
             payload.Timestamp));
     }
 
+    private void FailPendingCommands(Exception exception)
+    {
+        foreach (var pending in _pending)
+        {
+            if (_pending.TryRemove(pending.Key, out var source))
+            {
+                source.TrySetException(exception);
+            }
+        }
+    }
+
+    private void SetHealth(
+        EdgeConnectionState state,
+        string? error = null,
+        DateTimeOffset? lastMessageAt = null,
+        DateTimeOffset? lastHeartbeatAt = null)
+    {
+        Health = new EdgeConnectionHealth(
+            state,
+            lastMessageAt ?? Health.LastMessageAt,
+            lastHeartbeatAt ?? Health.LastHeartbeatAt,
+            error);
+        HealthChanged?.Invoke(this, Health);
+    }
+
     public async ValueTask DisposeAsync()
     {
+        _disposed = true;
         _disposeCts.Cancel();
+        SetHealth(EdgeConnectionState.Closed);
 
         if (_receiveTask is not null)
         {
@@ -206,7 +372,13 @@ internal sealed class RemoteDevice : IDevice, IAsyncDisposable
             watcher.Writer.TryComplete();
         }
 
-        await _connection.DisposeAsync().ConfigureAwait(false);
+        if (_connection is not null)
+        {
+            await _connection.DisposeAsync().ConfigureAwait(false);
+        }
+
+        _receiveCts?.Dispose();
+        _connectionLock.Dispose();
         _disposeCts.Dispose();
     }
 }
@@ -292,4 +464,3 @@ internal sealed class RemoteMotor : IMotor
         return SetSpeedAsync(0, cancellationToken);
     }
 }
-

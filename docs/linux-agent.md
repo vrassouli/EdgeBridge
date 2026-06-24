@@ -82,6 +82,18 @@ Then verify client connectivity from the Mac:
 dotnet run --project src/EdgeBridge.Samples.Console -- ws://rpi4-dev.local:8080/edgebridge/ blink
 ```
 
+To verify PWM with an LED fade on PWM channel `0`, run:
+
+```bash
+dotnet run --project src/EdgeBridge.Samples.Console -- ws://rpi4-dev.local:8080/edgebridge/ fade
+```
+
+Pass a channel number after `fade` when the Agent exposes a different PWM channel:
+
+```bash
+dotnet run --project src/EdgeBridge.Samples.Console -- ws://rpi4-dev.local:8080/edgebridge/ fade 1
+```
+
 ## Real GPIO backend
 
 To use physical GPIO lines, set the hardware backend in `/etc/edgebridge/agent.json`:
@@ -94,7 +106,15 @@ To use physical GPIO lines, set the hardware backend in `/etc/edgebridge/agent.j
     "backend": "linux-gpio",
     "gpioChip": 0,
     "pwmChip": 0,
-    "pwmFrequency": 1000
+    "pwmFrequency": 1000,
+    "motors": {
+      "left": {
+        "pwmChannel": 0,
+        "directionChannel": 23,
+        "invertDirection": false,
+        "maxDutyCycle": 1.0
+      }
+    }
   },
   "transports": {
     "webSocket": {
@@ -122,6 +142,37 @@ Channel numbers are Linux GPIO line offsets on the configured GPIO chip. On many
 ```bash
 gpioinfo
 ```
+
+## Motor Mapping
+
+For `linux-gpio`, named `IMotor` channels are configured under `hardware.motors`. A mapping uses one PWM channel for speed and, optionally, one GPIO direction channel for forward/reverse control:
+
+```json
+{
+  "hardware": {
+    "backend": "linux-gpio",
+    "gpioChip": 0,
+    "pwmChip": 0,
+    "pwmFrequency": 1000,
+    "motors": {
+      "left": {
+        "pwmChannel": 0,
+        "directionChannel": 23,
+        "invertDirection": false,
+        "maxDutyCycle": 1.0
+      },
+      "right": {
+        "pwmChannel": 1,
+        "directionChannel": 24,
+        "invertDirection": true,
+        "maxDutyCycle": 0.85
+      }
+    }
+  }
+}
+```
+
+Application code still calls `device.Motor("left")`; the Agent owns the physical channel mapping. Negative speed values require `directionChannel`. If the motor has no direction channel, use speeds from `0` to `1`.
 
 The service account must be allowed to access the GPIO chip devices. On Raspberry Pi OS this usually means adding it to the `gpio` group:
 

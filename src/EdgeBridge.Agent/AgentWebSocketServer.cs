@@ -1,4 +1,5 @@
 using System.Net;
+using System.Collections.Concurrent;
 using EdgeBridge.Abstractions;
 using EdgeBridge.Protocol;
 using EdgeBridge.Transport.WebSockets;
@@ -75,13 +76,14 @@ internal sealed class AgentWebSocketServer
         Console.WriteLine("Client connected.");
 
         using var heartbeatCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var subscriptions = new ConcurrentDictionary<string, CancellationTokenSource>();
         var heartbeatTask = SendHeartbeatsAsync(connection, heartbeatCts.Token);
 
         try
         {
             await foreach (var message in connection.ReceiveAsync(cancellationToken).ConfigureAwait(false))
             {
-                await HandleMessageAsync(connection, message, cancellationToken).ConfigureAwait(false);
+                await HandleMessageAsync(connection, message, subscriptions, cancellationToken).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException)
@@ -94,6 +96,12 @@ internal sealed class AgentWebSocketServer
         finally
         {
             heartbeatCts.Cancel();
+            foreach (var subscription in subscriptions.Values)
+            {
+                subscription.Cancel();
+                subscription.Dispose();
+            }
+
             try
             {
                 await heartbeatTask.ConfigureAwait(false);
@@ -109,6 +117,7 @@ internal sealed class AgentWebSocketServer
     private async Task HandleMessageAsync(
         ITransportConnection connection,
         ProtocolMessage message,
+        ConcurrentDictionary<string, CancellationTokenSource> subscriptions,
         CancellationToken cancellationToken)
     {
         switch (message)
@@ -117,7 +126,10 @@ internal sealed class AgentWebSocketServer
                 await HandleCommandAsync(connection, command, cancellationToken).ConfigureAwait(false);
                 break;
             case SubscribeRequest subscription:
-                await HandleSubscriptionAsync(connection, subscription, cancellationToken).ConfigureAwait(false);
+                await HandleSubscriptionAsync(connection, subscription, subscriptions, cancellationToken).ConfigureAwait(false);
+                break;
+            case UnsubscribeRequest unsubscribe:
+                HandleUnsubscribe(unsubscribe, subscriptions);
                 break;
         }
     }
@@ -215,6 +227,7 @@ internal sealed class AgentWebSocketServer
     private async Task HandleSubscriptionAsync(
         ITransportConnection connection,
         SubscribeRequest request,
+        ConcurrentDictionary<string, CancellationTokenSource> subscriptions,
         CancellationToken cancellationToken)
     {
         if (request.Event != EdgeBridgeCommands.DigitalWatch)
@@ -231,25 +244,58 @@ internal sealed class AgentWebSocketServer
 
         var payload = ProtocolJson.ReadPayload<DigitalWatchPayload>(request.Payload)
             ?? throw new InvalidOperationException("Digital watch payload is required.");
-        var subscriptionId = request.CorrelationId ?? $"digital:{payload.Channel}";
+        var subscriptionId = request.CorrelationId ?? request.MessageId;
+        var subscriptionCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+
+        if (subscriptions.TryRemove(subscriptionId, out var existingSubscription))
+        {
+            existingSubscription.Cancel();
+            existingSubscription.Dispose();
+        }
+
+        subscriptions[subscriptionId] = subscriptionCts;
 
         _ = Task.Run(async () =>
         {
-            await foreach (var state in _device.DigitalInput(payload.Channel).WatchAsync(cancellationToken).ConfigureAwait(false))
+            try
             {
-                await connection.SendAsync(new EventMessage
+                await foreach (var state in _device.DigitalInput(payload.Channel).WatchAsync(subscriptionCts.Token).ConfigureAwait(false))
                 {
-                    Type = MessageTypes.Event,
-                    DeviceId = _device.DeviceId,
-                    Event = EdgeBridgeEvents.DigitalInputChanged,
-                    SubscriptionId = subscriptionId,
-                    Payload = ProtocolJson.ToJsonElement(new DigitalReadResult(
-                        state.Channel.Number,
-                        state.IsHigh,
-                        state.Timestamp))
-                }, cancellationToken).ConfigureAwait(false);
+                    await connection.SendAsync(new EventMessage
+                    {
+                        Type = MessageTypes.Event,
+                        DeviceId = _device.DeviceId,
+                        Event = EdgeBridgeEvents.DigitalInputChanged,
+                        SubscriptionId = subscriptionId,
+                        Payload = ProtocolJson.ToJsonElement(new DigitalReadResult(
+                            state.Channel.Number,
+                            state.IsHigh,
+                            state.Timestamp))
+                    }, subscriptionCts.Token).ConfigureAwait(false);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            finally
+            {
+                if (subscriptions.TryRemove(subscriptionId, out var completedSubscription))
+                {
+                    completedSubscription.Dispose();
+                }
             }
         }, CancellationToken.None);
+    }
+
+    private static void HandleUnsubscribe(
+        UnsubscribeRequest request,
+        ConcurrentDictionary<string, CancellationTokenSource> subscriptions)
+    {
+        if (subscriptions.TryRemove(request.SubscriptionId, out var subscription))
+        {
+            subscription.Cancel();
+            subscription.Dispose();
+        }
     }
 
     private async Task SendHeartbeatsAsync(ITransportConnection connection, CancellationToken cancellationToken)
