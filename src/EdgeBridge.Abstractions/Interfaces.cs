@@ -10,9 +10,15 @@ public interface IDevice
 
     IDigitalInput DigitalInput(int channel);
 
+    IDigitalInput DigitalInput(int channel, DigitalInputOptions options);
+
     IPwmOutput PwmOutput(int channel);
 
     IMotor Motor(string name);
+
+    II2cDevice I2cDevice(int bus, int address);
+
+    ICamera Camera(string cameraId);
 }
 
 public interface IDeviceModule
@@ -61,6 +67,25 @@ public interface ICamera
     ValueTask StartStreamAsync(CancellationToken cancellationToken = default);
 
     ValueTask StopStreamAsync(CancellationToken cancellationToken = default);
+
+    ValueTask<CameraStatus> GetStatusAsync(CancellationToken cancellationToken = default);
+}
+
+public interface II2cDevice
+{
+    I2cBus Bus { get; }
+
+    I2cAddress Address { get; }
+
+    ValueTask<byte[]> ReadRegisterAsync(
+        int register,
+        int length,
+        CancellationToken cancellationToken = default);
+
+    ValueTask WriteRegisterAsync(
+        int register,
+        IReadOnlyList<byte> data,
+        CancellationToken cancellationToken = default);
 }
 
 public interface ISensor<T>
@@ -71,4 +96,3 @@ public interface ISensor<T>
 
     IAsyncEnumerable<SensorReading<T>> WatchAsync(CancellationToken cancellationToken = default);
 }
-

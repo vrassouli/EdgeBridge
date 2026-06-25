@@ -19,7 +19,21 @@
         "invertDirection": true,
         "maxDutyCycle": 1.0
       }
-    }
+    },
+    "i2cDevices": [
+      {
+        "name": "Sensor",
+        "bus": 1,
+        "address": 64
+      }
+    ],
+    "cameras": [
+      {
+        "cameraId": "camera0",
+        "name": "Camera 0",
+        "enabled": true
+      }
+    ]
   },
   "transports": {
     "webSocket": {
@@ -30,6 +44,7 @@
   "modules": {
     "gpio": true,
     "pwm": true,
-    "camera": false
+    "i2c": true,
+    "camera": true
   }
 }

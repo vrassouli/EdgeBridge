@@ -1,0 +1,68 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="EdgeBridge.Samples.Avalonia.Views.PwmView">
+  <UserControl.Styles>
+    <Style Selector="TextBox.pwmNameField">
+      <Setter Property="Width" Value="200" />
+      <Setter Property="MinWidth" Value="160" />
+    </Style>
+    <Style Selector="NumericUpDown.pwmChannelInput">
+      <Setter Property="Width" Value="112" />
+      <Setter Property="MinWidth" Value="112" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+      <Setter Property="ClipToBounds" Value="True" />
+    </Style>
+    <Style Selector="Slider.pwmDutySlider">
+      <Setter Property="Width" Value="220" />
+    </Style>
+    <Style Selector="TextBlock.pwmDutyText">
+      <Setter Property="Width" Value="70" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+  </UserControl.Styles>
+  <StackPanel Spacing="16">
+    <Grid ColumnDefinitions="*,Auto">
+      <TextBlock Text="PWM Outputs" Classes="pageTitle" />
+      <Button Grid.Column="1" Content="Add PWM" Command="{Binding AddCommand}" Classes="primary" />
+    </Grid>
+    <ItemsControl ItemsSource="{Binding Channels}">
+      <ItemsControl.ItemTemplate>
+        <DataTemplate>
+          <Border Classes="itemCard">
+            <StackPanel>
+              <WrapPanel>
+                <TextBox Text="{Binding Name}"
+                         Classes="pwmNameField"
+                         Margin="0,0,10,10"
+                         VerticalAlignment="Center" />
+                <NumericUpDown Value="{Binding Channel}"
+                               Minimum="0"
+                               Maximum="256"
+                               FormatString="0"
+                               Classes="pwmChannelInput"
+                               Margin="0,0,10,10"
+                               VerticalAlignment="Center" />
+                <Slider Value="{Binding DutyCycle}"
+                        Minimum="0"
+                        Maximum="1"
+                        TickFrequency="0.05"
+                        Classes="pwmDutySlider"
+                        Margin="0,0,10,10"
+                        VerticalAlignment="Center" />
+                <TextBlock Text="{Binding DutyPercent, StringFormat={}{0}%}"
+                           Classes="pwmDutyText"
+                           Margin="0,0,10,10"
+                           VerticalAlignment="Center" />
+                <Button Content="Remove"
+                        Command="{Binding RemoveCommand}"
+                        Margin="0,0,10,10"
+                        VerticalAlignment="Center" />
+              </WrapPanel>
+              <TextBlock Text="{Binding Status}" Foreground="#647086" />
+            </StackPanel>
+          </Border>
+        </DataTemplate>
+      </ItemsControl.ItemTemplate>
+    </ItemsControl>
+  </StackPanel>
+</UserControl>

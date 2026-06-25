@@ -1,0 +1,101 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="EdgeBridge.Samples.Avalonia.Views.GpioView">
+  <UserControl.Styles>
+    <Style Selector="TextBox.gpioNameField">
+      <Setter Property="Width" Value="200" />
+      <Setter Property="MinWidth" Value="160" />
+    </Style>
+    <Style Selector="NumericUpDown.gpioChannelInput">
+      <Setter Property="Width" Value="112" />
+      <Setter Property="MinWidth" Value="112" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+      <Setter Property="ClipToBounds" Value="True" />
+    </Style>
+    <Style Selector="TextBlock.gpioDirection">
+      <Setter Property="Width" Value="80" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style Selector="TextBlock.gpioValueText">
+      <Setter Property="Width" Value="100" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style Selector="ComboBox.gpioPullMode">
+      <Setter Property="Width" Value="130" />
+    </Style>
+    <Style Selector="Button.gpioAction">
+      <Setter Property="MinWidth" Value="78" />
+    </Style>
+  </UserControl.Styles>
+
+  <StackPanel Spacing="16">
+    <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+      <TextBlock Text="GPIO Channels" Classes="pageTitle" />
+      <Button Grid.Column="1" Content="Add Input" Command="{Binding AddInputCommand}" />
+      <Button Grid.Column="2" Content="Add Output" Command="{Binding AddOutputCommand}" Classes="primary" />
+    </Grid>
+    <ItemsControl ItemsSource="{Binding Channels}">
+      <ItemsControl.ItemTemplate>
+        <DataTemplate>
+          <Border Classes="itemCard">
+            <StackPanel>
+              <WrapPanel>
+                <TextBox Text="{Binding Name}"
+                         Watermark="Name"
+                         Classes="gpioNameField"
+                         Margin="0,0,10,10"
+                         VerticalAlignment="Center" />
+                <NumericUpDown Value="{Binding Channel}"
+                               Minimum="0"
+                               Maximum="256"
+                               FormatString="0"
+                               Classes="gpioChannelInput"
+                               Margin="0,0,10,10"
+                               VerticalAlignment="Center" />
+                <TextBlock Text="{Binding Direction}"
+                           Classes="gpioDirection"
+                           Margin="0,0,10,10"
+                           VerticalAlignment="Center" />
+                <ToggleSwitch IsChecked="{Binding Value}"
+                              IsVisible="{Binding IsOutput}"
+                              OnContent="High"
+                              OffContent="Low"
+                              Margin="0,0,10,10"
+                              VerticalAlignment="Center" />
+                <TextBlock Text="{Binding ValueText}"
+                           IsVisible="{Binding IsInput}"
+                           Classes="gpioValueText"
+                           Margin="0,0,10,10"
+                           VerticalAlignment="Center" />
+                <ComboBox ItemsSource="{Binding PullModes}"
+                          SelectedItem="{Binding PullMode}"
+                          IsVisible="{Binding IsInput}"
+                          Classes="gpioPullMode"
+                          Margin="0,0,10,10"
+                          VerticalAlignment="Center" />
+                <Button Content="Read"
+                        Command="{Binding ReadCommand}"
+                        IsVisible="{Binding IsInput}"
+                        Classes="gpioAction"
+                        Margin="0,0,10,10"
+                        VerticalAlignment="Center" />
+                <Button Content="{Binding WatchButtonText}"
+                        Command="{Binding ToggleWatchCommand}"
+                        IsVisible="{Binding IsInput}"
+                        Classes="gpioAction"
+                        Margin="0,0,10,10"
+                        VerticalAlignment="Center" />
+                <Button Content="Remove"
+                        Command="{Binding RemoveCommand}"
+                        Classes="gpioAction"
+                        Margin="0,0,10,10"
+                        VerticalAlignment="Center" />
+              </WrapPanel>
+              <TextBlock Text="{Binding Status}" Foreground="#647086" />
+            </StackPanel>
+          </Border>
+        </DataTemplate>
+      </ItemsControl.ItemTemplate>
+    </ItemsControl>
+  </StackPanel>
+</UserControl>

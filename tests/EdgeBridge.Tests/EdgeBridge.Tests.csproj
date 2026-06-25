@@ -5,6 +5,7 @@
     <ProjectReference Include="..\..\src\EdgeBridge.Agent\EdgeBridge.Agent.csproj" />
     <ProjectReference Include="..\..\src\EdgeBridge.Client\EdgeBridge.Client.csproj" />
     <ProjectReference Include="..\..\src\EdgeBridge.Protocol\EdgeBridge.Protocol.csproj" />
+    <ProjectReference Include="..\..\src\EdgeBridge.Samples.Avalonia\EdgeBridge.Samples.Avalonia.csproj" />
     <ProjectReference Include="..\..\src\EdgeBridge.Transport.WebSockets\EdgeBridge.Transport.WebSockets.csproj" />
   </ItemGroup>
 

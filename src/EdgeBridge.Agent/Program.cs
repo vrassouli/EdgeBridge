@@ -9,8 +9,9 @@ Console.CancelKeyPress += (_, args) =>
     cancellation.Cancel();
 };
 
-var (config, configSource) = await LoadConfigAsync(args, cancellation.Token).ConfigureAwait(false);
-Console.WriteLine($"EdgeBridge Agent config: {configSource}");
+var configStore = await AgentConfigStore.LoadAsync(args, cancellation.Token).ConfigureAwait(false);
+var config = configStore.Current;
+Console.WriteLine($"EdgeBridge Agent config: {configStore.Source}");
 Console.WriteLine($"EdgeBridge Agent device: {config.DeviceId} ({config.DeviceName})");
 
 IDisposable? disposableDevice = null;
@@ -18,7 +19,7 @@ try
 {
     var device = DeviceFactory.Create(config);
     disposableDevice = device as IDisposable;
-    var server = new AgentWebSocketServer(device, new Uri(config.Transports.WebSocket.Url));
+    var server = new AgentWebSocketServer(device, configStore, new Uri(config.Transports.WebSocket.Url));
 
     await server.RunAsync(cancellation.Token).ConfigureAwait(false);
 }
@@ -41,28 +42,112 @@ finally
     disposableDevice?.Dispose();
 }
 
-static async ValueTask<(AgentConfig Config, string Source)> LoadConfigAsync(
-    string[] args,
-    CancellationToken cancellationToken)
+internal sealed class AgentConfigStore
 {
-    var configPath = args.FirstOrDefault(arg => arg.StartsWith("--config=", StringComparison.OrdinalIgnoreCase))?
-        .Split('=', 2)[1];
+    private readonly SemaphoreSlim _lock = new(1, 1);
 
-    if (configPath is null)
+    private AgentConfigStore(AgentConfig current, string path, string source)
     {
-        const string defaultConfigPath = "/etc/edgebridge/agent.json";
-
-        if (!File.Exists(defaultConfigPath))
-        {
-            return (new AgentConfig(), "built-in defaults");
-        }
-
-        configPath = defaultConfigPath;
+        Current = current;
+        Path = path;
+        Source = source;
     }
 
-    await using var stream = File.OpenRead(configPath);
-    var config = await JsonSerializer.DeserializeAsync<AgentConfig>(stream, ProtocolJson.Options, cancellationToken).ConfigureAwait(false)
-        ?? new AgentConfig();
+    public AgentConfig Current { get; private set; }
 
-    return (config, configPath);
+    public string Path { get; }
+
+    public string Source { get; }
+
+    public static async ValueTask<AgentConfigStore> LoadAsync(
+        string[] args,
+        CancellationToken cancellationToken)
+    {
+        var configPath = args.FirstOrDefault(arg => arg.StartsWith("--config=", StringComparison.OrdinalIgnoreCase))?
+            .Split('=', 2)[1];
+
+        if (configPath is null)
+        {
+            const string defaultConfigPath = "/etc/edgebridge/agent.json";
+
+            if (File.Exists(defaultConfigPath))
+            {
+                configPath = defaultConfigPath;
+            }
+            else
+            {
+                configPath = System.IO.Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                    "EdgeBridge",
+                    "agent.json");
+            }
+        }
+
+        if (!File.Exists(configPath))
+        {
+            return new AgentConfigStore(new AgentConfig(), configPath, $"built-in defaults; updates persist to {configPath}");
+        }
+
+        await using var stream = File.OpenRead(configPath);
+        var config = await JsonSerializer.DeserializeAsync<AgentConfig>(stream, ProtocolJson.Options, cancellationToken).ConfigureAwait(false)
+            ?? new AgentConfig();
+
+        return new AgentConfigStore(config, configPath, configPath);
+    }
+
+    public async ValueTask<AgentConfigUpdateResult> UpdateAsync(
+        AgentConfigDto config,
+        CancellationToken cancellationToken)
+    {
+        var next = config.ToAgentConfig();
+        Validate(next);
+
+        await _lock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var directory = System.IO.Path.GetDirectoryName(Path);
+            if (!string.IsNullOrWhiteSpace(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            await using var stream = File.Create(Path);
+            await JsonSerializer.SerializeAsync(stream, next, ProtocolJson.Options, cancellationToken).ConfigureAwait(false);
+            Current = next;
+        }
+        finally
+        {
+            _lock.Release();
+        }
+
+        return new AgentConfigUpdateResult(
+            Accepted: true,
+            RestartRequired: true,
+            Message: "Configuration was saved. Restart the Agent for runtime changes to take effect.",
+            Config: Current.ToDto());
+    }
+
+    private static void Validate(AgentConfig config)
+    {
+        if (string.IsNullOrWhiteSpace(config.DeviceId))
+        {
+            throw new InvalidOperationException("Device ID is required.");
+        }
+
+        if (string.IsNullOrWhiteSpace(config.DeviceName))
+        {
+            throw new InvalidOperationException("Device name is required.");
+        }
+
+        if (config.Hardware.PwmFrequency <= 0)
+        {
+            throw new InvalidOperationException("PWM frequency must be greater than zero.");
+        }
+
+        if (config.Transports.WebSocket.Enabled &&
+            !Uri.TryCreate(config.Transports.WebSocket.Url, UriKind.Absolute, out _))
+        {
+            throw new InvalidOperationException("WebSocket URL must be an absolute URI.");
+        }
+    }
 }

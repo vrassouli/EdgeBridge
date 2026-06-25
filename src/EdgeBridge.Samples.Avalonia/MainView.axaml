@@ -1,0 +1,155 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:EdgeBridge.Samples.Avalonia.ViewModels"
+             xmlns:views="using:EdgeBridge.Samples.Avalonia.Views"
+             x:Class="EdgeBridge.Samples.Avalonia.MainView">
+  <UserControl.Styles>
+    <Style Selector="ListBoxItem">
+      <Setter Property="Template">
+        <ControlTemplate>
+          <ContentPresenter Background="Transparent"
+                            Content="{TemplateBinding Content}"
+                            ContentTemplate="{TemplateBinding ContentTemplate}"
+                            Padding="{TemplateBinding Padding}"
+                            HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                            VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}" />
+        </ControlTemplate>
+      </Setter>
+    </Style>
+    <Style Selector="ListBoxItem:pointerover Border.listCard, ListBoxItem:pointerover Border.navItem">
+      <Setter Property="Background" Value="#EFF4FB" />
+      <Setter Property="BorderBrush" Value="#BCD0EA" />
+    </Style>
+    <Style Selector="ListBoxItem:selected Border.listCard, ListBoxItem:selected Border.navItem">
+      <Setter Property="Background" Value="#E8F1FF" />
+      <Setter Property="BorderBrush" Value="#6EA3F8" />
+      <Setter Property="BorderThickness" Value="1.5" />
+    </Style>
+    <Style Selector="ListBoxItem:selected TextBlock">
+      <Setter Property="Foreground" Value="#10213F" />
+    </Style>
+  </UserControl.Styles>
+
+  <UserControl.DataTemplates>
+    <DataTemplate DataType="{x:Type vm:MainViewModel}">
+      <views:OverviewView />
+    </DataTemplate>
+    <DataTemplate DataType="{x:Type vm:GpioFeatureViewModel}">
+      <views:GpioView />
+    </DataTemplate>
+    <DataTemplate DataType="{x:Type vm:PwmFeatureViewModel}">
+      <views:PwmView />
+    </DataTemplate>
+    <DataTemplate DataType="{x:Type vm:MotorFeatureViewModel}">
+      <views:MotorView />
+    </DataTemplate>
+    <DataTemplate DataType="{x:Type vm:I2cFeatureViewModel}">
+      <views:I2cView />
+    </DataTemplate>
+    <DataTemplate DataType="{x:Type vm:CameraFeatureViewModel}">
+      <views:CameraView />
+    </DataTemplate>
+    <DataTemplate DataType="{x:Type vm:AgentConfigViewModel}">
+      <views:AgentConfigView />
+    </DataTemplate>
+  </UserControl.DataTemplates>
+
+  <Grid RowDefinitions="Auto,*,Auto" Background="#F5F7FA">
+    <Border Grid.Row="0" Background="#FFFFFF" BorderBrush="#D9E0EA" BorderThickness="0,0,0,1" Padding="24,16">
+      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
+        <StackPanel Spacing="2">
+          <TextBlock Text="EdgeBridge Device Console" FontSize="22" FontWeight="SemiBold" Foreground="#172033" />
+          <TextBlock Text="Manage local, remote, and simulated hardware through one abstraction surface."
+                     Foreground="#5C667A" />
+        </StackPanel>
+        <Border Grid.Column="1"
+                Classes="statePill"
+                MinWidth="120"
+                MinHeight="44"
+                HorizontalAlignment="Right"
+                VerticalAlignment="Center">
+          <TextBlock Text="{Binding ConnectionState}"
+                     FontWeight="SemiBold"
+                     Foreground="#172033"
+                     HorizontalAlignment="Center"
+                     VerticalAlignment="Center"
+                     TextAlignment="Center" />
+        </Border>
+      </Grid>
+    </Border>
+
+    <Grid Grid.Row="1" ColumnDefinitions="300,*">
+      <Border Background="#FFFFFF" BorderBrush="#D9E0EA" BorderThickness="0,0,1,0" Padding="18">
+        <Grid RowDefinitions="Auto,Auto,*,Auto" RowSpacing="14">
+          <TextBlock Text="Devices" FontSize="16" FontWeight="SemiBold" Foreground="#172033" />
+
+          <StackPanel Grid.Row="1" Spacing="8">
+            <TextBlock Text="Name" Classes="fieldLabel" />
+            <TextBox Text="{Binding SelectedDeviceName}" Watermark="Device name" />
+            <TextBlock Text="Address" Classes="fieldLabel" />
+            <TextBox Text="{Binding SelectedEndpoint}" Watermark="ws://host:8080/edgebridge/" />
+          </StackPanel>
+
+          <ListBox Grid.Row="2"
+                   ItemsSource="{Binding Devices}"
+                   SelectedItem="{Binding SelectedProfile}"
+                   Background="Transparent"
+                   BorderThickness="0">
+            <ListBox.ItemTemplate>
+              <DataTemplate>
+                <Border Classes="listCard" HorizontalAlignment="Stretch" MinHeight="58">
+                  <StackPanel Spacing="2">
+                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" Foreground="#172033" />
+                    <TextBlock Text="{Binding Endpoint}" FontSize="12" Foreground="#647086" TextTrimming="CharacterEllipsis" />
+                  </StackPanel>
+                </Border>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+
+          <Grid Grid.Row="3" ColumnDefinitions="*,*" ColumnSpacing="8">
+            <Button Content="Add" Command="{Binding AddDeviceCommand}" />
+            <Button Grid.Column="1" Content="Remove" Command="{Binding RemoveDeviceCommand}" />
+          </Grid>
+        </Grid>
+      </Border>
+
+      <Grid Grid.Column="1" RowDefinitions="Auto,*" Margin="24" RowSpacing="18">
+        <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="10">
+          <StackPanel Spacing="2">
+            <TextBlock Text="{Binding DeviceInfoText}" FontSize="20" FontWeight="SemiBold" Foreground="#172033" />
+            <TextBlock Text="{Binding CapabilitiesText}" Foreground="#647086" />
+          </StackPanel>
+          <Button Grid.Column="1" Content="Connect" Command="{Binding ConnectCommand}" Classes="primary" />
+          <Button Grid.Column="2" Content="Disconnect" Command="{Binding DisconnectCommand}" />
+          <Button Grid.Column="3" Content="Save" Command="{Binding SaveCommand}" />
+        </Grid>
+
+        <Grid Grid.Row="1" ColumnDefinitions="176,*" ColumnSpacing="18">
+          <ListBox ItemsSource="{Binding Features}"
+                   SelectedItem="{Binding SelectedFeature}"
+                   Background="Transparent"
+                   BorderThickness="0">
+            <ListBox.ItemTemplate>
+              <DataTemplate>
+                <Border Classes="navItem" HorizontalAlignment="Stretch" MinHeight="38">
+                  <TextBlock Text="{Binding Name}" Foreground="#172033" FontWeight="SemiBold" />
+                </Border>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+
+          <Border Grid.Column="1" Background="#FFFFFF" BorderBrush="#D9E0EA" BorderThickness="1" CornerRadius="8" Padding="20">
+            <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+              <ContentControl Content="{Binding SelectedFeature.ViewModel}" />
+            </ScrollViewer>
+          </Border>
+        </Grid>
+      </Grid>
+    </Grid>
+
+    <Border Grid.Row="2" Background="#FFFFFF" BorderBrush="#D9E0EA" BorderThickness="0,1,0,0" Padding="18,10">
+      <TextBlock Text="{Binding Status}" Foreground="#475067" TextTrimming="CharacterEllipsis" />
+    </Border>
+  </Grid>
+</UserControl>

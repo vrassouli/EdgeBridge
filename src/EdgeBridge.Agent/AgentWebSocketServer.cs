@@ -10,11 +10,13 @@ internal sealed class AgentWebSocketServer
 {
     private readonly HttpListener _listener = new();
     private readonly IDevice _device;
+    private readonly AgentConfigStore _configStore;
     private readonly Uri _listenUri;
 
-    public AgentWebSocketServer(IDevice device, Uri listenUri)
+    public AgentWebSocketServer(IDevice device, AgentConfigStore configStore, Uri listenUri)
     {
         _device = device;
+        _configStore = configStore;
         _listenUri = listenUri;
         _listener.Prefixes.Add(ToHttpListenerPrefix(listenUri));
     }
@@ -145,6 +147,9 @@ internal sealed class AgentWebSocketServer
             {
                 EdgeBridgeCommands.DeviceGetInfo => ProtocolJson.ToJsonElement(new DeviceInfoPayload(
                     await _device.GetInfoAsync(cancellationToken).ConfigureAwait(false))),
+                EdgeBridgeCommands.DeviceConfigGet => ProtocolJson.ToJsonElement(new AgentConfigPayload(
+                    _configStore.Current.ToDto())),
+                EdgeBridgeCommands.DeviceConfigUpdate => await UpdateConfigAsync(request, cancellationToken).ConfigureAwait(false),
                 EdgeBridgeCommands.DevicePing => ProtocolJson.ToJsonElement(new PongPayload(
                     _device.DeviceId,
                     DateTimeOffset.UtcNow)),
@@ -152,6 +157,11 @@ internal sealed class AgentWebSocketServer
                 EdgeBridgeCommands.DigitalRead => await ReadDigitalInputAsync(request, cancellationToken).ConfigureAwait(false),
                 EdgeBridgeCommands.PwmSet => await SetPwmAsync(request, cancellationToken).ConfigureAwait(false),
                 EdgeBridgeCommands.MotorSetSpeed => await SetMotorAsync(request, cancellationToken).ConfigureAwait(false),
+                EdgeBridgeCommands.I2cReadRegister => await ReadI2cRegisterAsync(request, cancellationToken).ConfigureAwait(false),
+                EdgeBridgeCommands.I2cWriteRegister => await WriteI2cRegisterAsync(request, cancellationToken).ConfigureAwait(false),
+                EdgeBridgeCommands.CameraStartStream => await StartCameraAsync(request, cancellationToken).ConfigureAwait(false),
+                EdgeBridgeCommands.CameraStopStream => await StopCameraAsync(request, cancellationToken).ConfigureAwait(false),
+                EdgeBridgeCommands.CameraGetStatus => await GetCameraStatusAsync(request, cancellationToken).ConfigureAwait(false),
                 _ => throw new NotSupportedException($"Command '{request.Command}' is not supported by this agent.")
             };
 
@@ -180,6 +190,17 @@ internal sealed class AgentWebSocketServer
         }
     }
 
+    private async ValueTask<System.Text.Json.JsonElement> UpdateConfigAsync(
+        CommandRequest request,
+        CancellationToken cancellationToken)
+    {
+        var payload = ProtocolJson.ReadPayload<AgentConfigPayload>(request.Payload)
+            ?? throw new InvalidOperationException("Agent config payload is required.");
+
+        var result = await _configStore.UpdateAsync(payload.Config, cancellationToken).ConfigureAwait(false);
+        return ProtocolJson.ToJsonElement(result);
+    }
+
     private async ValueTask<System.Text.Json.JsonElement> WriteDigitalOutputAsync(
         CommandRequest request,
         CancellationToken cancellationToken)
@@ -198,7 +219,10 @@ internal sealed class AgentWebSocketServer
         var payload = ProtocolJson.ReadPayload<DigitalReadPayload>(request.Payload)
             ?? throw new InvalidOperationException("Digital read payload is required.");
 
-        var state = await _device.DigitalInput(payload.Channel).ReadAsync(cancellationToken).ConfigureAwait(false);
+        var state = await _device
+            .DigitalInput(payload.Channel, new DigitalInputOptions(payload.PullMode))
+            .ReadAsync(cancellationToken)
+            .ConfigureAwait(false);
         return ProtocolJson.ToJsonElement(new DigitalReadResult(state.Channel.Number, state.IsHigh, state.Timestamp));
     }
 
@@ -222,6 +246,72 @@ internal sealed class AgentWebSocketServer
 
         await _device.Motor(payload.Name).SetSpeedAsync(payload.Speed, cancellationToken).ConfigureAwait(false);
         return ProtocolJson.ToJsonElement(new { ok = true });
+    }
+
+    private async ValueTask<System.Text.Json.JsonElement> ReadI2cRegisterAsync(
+        CommandRequest request,
+        CancellationToken cancellationToken)
+    {
+        var payload = ProtocolJson.ReadPayload<I2cReadRegisterPayload>(request.Payload)
+            ?? throw new InvalidOperationException("I2C read payload is required.");
+
+        var data = await _device.I2cDevice(payload.Bus, payload.Address)
+            .ReadRegisterAsync(payload.Register, payload.Length, cancellationToken)
+            .ConfigureAwait(false);
+
+        return ProtocolJson.ToJsonElement(new I2cReadRegisterResult(
+            payload.Bus,
+            payload.Address,
+            payload.Register,
+            data,
+            DateTimeOffset.UtcNow));
+    }
+
+    private async ValueTask<System.Text.Json.JsonElement> WriteI2cRegisterAsync(
+        CommandRequest request,
+        CancellationToken cancellationToken)
+    {
+        var payload = ProtocolJson.ReadPayload<I2cWriteRegisterPayload>(request.Payload)
+            ?? throw new InvalidOperationException("I2C write payload is required.");
+
+        await _device.I2cDevice(payload.Bus, payload.Address)
+            .WriteRegisterAsync(payload.Register, payload.Data, cancellationToken)
+            .ConfigureAwait(false);
+
+        return ProtocolJson.ToJsonElement(new { ok = true });
+    }
+
+    private async ValueTask<System.Text.Json.JsonElement> StartCameraAsync(
+        CommandRequest request,
+        CancellationToken cancellationToken)
+    {
+        var payload = ProtocolJson.ReadPayload<CameraStreamPayload>(request.Payload)
+            ?? throw new InvalidOperationException("Camera payload is required.");
+
+        await _device.Camera(payload.CameraId).StartStreamAsync(cancellationToken).ConfigureAwait(false);
+        return ProtocolJson.ToJsonElement(new { ok = true });
+    }
+
+    private async ValueTask<System.Text.Json.JsonElement> StopCameraAsync(
+        CommandRequest request,
+        CancellationToken cancellationToken)
+    {
+        var payload = ProtocolJson.ReadPayload<CameraStreamPayload>(request.Payload)
+            ?? throw new InvalidOperationException("Camera payload is required.");
+
+        await _device.Camera(payload.CameraId).StopStreamAsync(cancellationToken).ConfigureAwait(false);
+        return ProtocolJson.ToJsonElement(new { ok = true });
+    }
+
+    private async ValueTask<System.Text.Json.JsonElement> GetCameraStatusAsync(
+        CommandRequest request,
+        CancellationToken cancellationToken)
+    {
+        var payload = ProtocolJson.ReadPayload<CameraStreamPayload>(request.Payload)
+            ?? throw new InvalidOperationException("Camera payload is required.");
+
+        var status = await _device.Camera(payload.CameraId).GetStatusAsync(cancellationToken).ConfigureAwait(false);
+        return ProtocolJson.ToJsonElement(new CameraStatusPayload(status));
     }
 
     private async Task HandleSubscriptionAsync(
@@ -259,7 +349,10 @@ internal sealed class AgentWebSocketServer
         {
             try
             {
-                await foreach (var state in _device.DigitalInput(payload.Channel).WatchAsync(subscriptionCts.Token).ConfigureAwait(false))
+                await foreach (var state in _device
+                    .DigitalInput(payload.Channel, new DigitalInputOptions(payload.PullMode))
+                    .WatchAsync(subscriptionCts.Token)
+                    .ConfigureAwait(false))
                 {
                     await connection.SendAsync(new EventMessage
                     {

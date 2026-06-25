@@ -49,19 +49,22 @@ Implemented now:
 - mock hardware provider,
 - Linux GPIO hardware backend,
 - configuration-driven Linux GPIO/PWM motor mapping,
+- remote I2C register access contracts with mock support,
+- camera control/status contracts with mock support,
+- durable Agent config get/update protocol with restart-required semantics,
 - remote client SDK,
 - client connection health reporting and explicit reconnect support,
 - provisioning contracts,
-- console samples,
-- cross-platform Avalonia GUI sample for RGB LED toggle control,
+- professional all-in-one Avalonia GUI sample for device management,
 - Linux install notes and systemd packaging,
-- lightweight test harness covering protocol serialization, command correlation, mock behavior, watch unsubscribe behavior, and client health/reconnect behavior.
+- lightweight test harness covering protocol serialization, command correlation, profile persistence, mock behavior, I2C/camera controls, config updates, watch unsubscribe behavior, and client health/reconnect behavior.
 
 Not implemented yet:
 
 - authentication/authorization for WebSocket transport,
 - real WiFi/Bluetooth provisioning flows,
 - camera stream transport,
+- real Linux I2C and camera hardware providers,
 - full client-agent integration coverage against a real WebSocket listener.
 
 See [`TODO.md`](TODO.md) for the active roadmap.
@@ -93,8 +96,8 @@ See [`TODO.md`](TODO.md) for the active roadmap.
     ├── EdgeBridge.Agent/
     ├── EdgeBridge.Client/
     ├── EdgeBridge.Provisioning/
-    ├── EdgeBridge.Samples.Console/
-    └── EdgeBridge.Samples.Avalonia/
+    ├── EdgeBridge.Samples.Avalonia/
+    └── EdgeBridge.Samples.Avalonia.Android/
 ```
 
 ### Projects
@@ -107,8 +110,8 @@ See [`TODO.md`](TODO.md) for the active roadmap.
 | `EdgeBridge.Agent` | Device-side runtime/daemon. Hosts the selected hardware backend, currently `mock` or `linux-gpio`. |
 | `EdgeBridge.Client` | Remote proxy implementation that exposes `IDevice` over a transport connection. |
 | `EdgeBridge.Provisioning` | Contracts for future device setup/provisioning flows such as WiFi/Bluetooth onboarding. |
-| `EdgeBridge.Samples.Console` | Console samples for blinking, button watching, and toy-car control. |
-| `EdgeBridge.Samples.Avalonia` | Cross-platform desktop GUI sample for toggling RGB LED GPIO channels. |
+| `EdgeBridge.Samples.Avalonia` | Professional all-in-one Avalonia GUI sample for managing devices and feature pages. |
+| `EdgeBridge.Samples.Avalonia.Android` | Android host project for the shared Avalonia GUI. Not included in the default solution build because Android workloads are optional. |
 
 ---
 
@@ -156,30 +159,9 @@ Remote clients connect using the WebSocket form:
 ws://localhost:8080/edgebridge/
 ```
 
-### 3. Run a sample from another terminal
+### 3. Run the all-in-one GUI sample
 
-```bash
-dotnet run --project src/EdgeBridge.Samples.Console -- ws://localhost:8080/edgebridge/ blink
-```
-
-Available samples:
-
-```bash
-dotnet run --project src/EdgeBridge.Samples.Console -- ws://localhost:8080/edgebridge/ blink
-dotnet run --project src/EdgeBridge.Samples.Console -- ws://localhost:8080/edgebridge/ button
-dotnet run --project src/EdgeBridge.Samples.Console -- ws://localhost:8080/edgebridge/ fade
-dotnet run --project src/EdgeBridge.Samples.Console -- ws://localhost:8080/edgebridge/ toy-car
-```
-
-The `fade` sample drives an LED through `IPwmOutput` and fades duty cycle up and down on PWM channel `0` by default. Pass a channel number after the sample name to use a different PWM channel:
-
-```bash
-dotnet run --project src/EdgeBridge.Samples.Console -- ws://localhost:8080/edgebridge/ fade 1
-```
-
-### Avalonia RGB LED sample
-
-The Avalonia desktop sample connects to an EdgeBridge Agent and toggles an RGB LED through three `IDigitalOutput` channels.
+The Avalonia sample is the primary sample surface. It persists local device profiles, connects to a selected Agent, and exposes dynamic pages for GPIO, PWM, motors, I2C register access, camera control/status, and Agent configuration.
 
 ```bash
 dotnet run --project src/EdgeBridge.Samples.Avalonia
@@ -191,7 +173,18 @@ The default endpoint is:
 ws://localhost:8080/edgebridge/
 ```
 
-The default GPIO channel mapping is red `17`, green `27`, and blue `22`. Change the channel fields in the UI before connecting if your device uses different GPIO line offsets.
+Profiles are stored in the current user's app data folder under `EdgeBridge/sample-devices.json`.
+
+### Android host
+
+The Android host project is present under `src/EdgeBridge.Samples.Avalonia.Android`, but it is intentionally not part of `EdgeBridge.slnx` so normal builds do not require Android workloads.
+
+To build or run it, install the Android workload and SDK first:
+
+```bash
+dotnet workload install android
+dotnet build src/EdgeBridge.Samples.Avalonia.Android
+```
 
 ---
 
@@ -215,7 +208,21 @@ The Agent can load a JSON config file:
         "invertDirection": false,
         "maxDutyCycle": 1.0
       }
-    }
+    },
+    "i2cDevices": [
+      {
+        "name": "Sensor",
+        "bus": 1,
+        "address": 64
+      }
+    ],
+    "cameras": [
+      {
+        "cameraId": "camera0",
+        "name": "Camera 0",
+        "enabled": true
+      }
+    ]
   },
   "transports": {
     "webSocket": {
@@ -226,7 +233,8 @@ The Agent can load a JSON config file:
   "modules": {
     "gpio": true,
     "pwm": true,
-    "camera": false
+    "i2c": true,
+    "camera": true
   }
 }
 ```
@@ -243,13 +251,9 @@ When no `--config` argument is provided, the Agent first tries:
 /etc/edgebridge/agent.json
 ```
 
-If that file does not exist, it uses built-in development defaults.
+If that file does not exist, it uses built-in development defaults. Config updates sent by the GUI are persisted to the active config path when one exists, otherwise to a user-writable app data config path. Updated config returns `restartRequired: true`; restart the Agent before expecting backend, chip, module, I2C, camera, or motor mapping changes to affect the running device.
 
-For a device on your network, clients should connect with the device IP or hostname:
-
-```bash
-dotnet run --project src/EdgeBridge.Samples.Console -- ws://DEVICE_IP:8080/edgebridge/ blink
-```
+For a device on your network, add a GUI profile using the device IP or hostname, for example `ws://DEVICE_IP:8080/edgebridge/`.
 
 ### Real GPIO backend
 
@@ -267,6 +271,8 @@ Set the hardware backend to `linux-gpio` on a Linux device to use real GPIO line
 ```
 
 Channel numbers are Linux GPIO line offsets on the selected GPIO chip, not Raspberry Pi board-specific pin names. Use `gpioinfo` on the target device to inspect available GPIO chips and line offsets.
+
+Digital inputs default to plain floating inputs. If an input channel is disconnected, the physical pin may rapidly switch between High and Low due to electrical noise. Give watched inputs a defined idle state with a pull-up or pull-down resistor, or connect them through hardware that actively drives both states. The client API and GUI profile can request `Floating`, `PullDown`, or `PullUp`; the `linux-gpio` backend maps those options to the platform input modes, including Raspberry Pi internal pull resistors when supported by the OS driver.
 
 Named motors can be mapped in Agent configuration without changing application code. Each motor maps to a PWM channel and can optionally use a direction GPIO channel:
 
@@ -328,6 +334,7 @@ The MVP abstraction layer currently includes:
 - `IDigitalInput`
 - `IPwmOutput`
 - `IMotor`
+- `II2cDevice`
 - `ICamera`
 - `ISensor<T>`
 
@@ -396,6 +403,7 @@ Accepted architecture decisions:
 
 - [`ADR 0001: MVP Architecture`](docs/adr/0001-mvp-architecture.md)
 - [`ADR 0002: Linux GPIO Hardware Backend`](docs/adr/0002-linux-gpio-hardware-backend.md)
+- [`ADR 0003: Primary GUI Sample and Agent Config Updates`](docs/adr/0003-primary-gui-sample-and-agent-config-updates.md)
 
 ---
 
@@ -413,14 +421,11 @@ Run the Agent:
 dotnet run --project src/EdgeBridge.Agent
 ```
 
-Run a sample:
+Run the GUI sample:
 
 ```bash
-dotnet run --project src/EdgeBridge.Samples.Console -- ws://localhost:8080/edgebridge/ blink
-dotnet run --project src/EdgeBridge.Samples.Console -- ws://localhost:8080/edgebridge/ fade
+dotnet run --project src/EdgeBridge.Samples.Avalonia
 ```
-
-Stop long-running samples with `Ctrl+C`.
 
 ---
 
@@ -431,6 +436,7 @@ Near-term work:
 - add WebSocket authentication and authorization,
 - implement WiFi/Bluetooth provisioning,
 - add camera stream protocol and transport support,
+- implement real Linux I2C and camera hardware providers,
 - expand client-agent integration tests against a real WebSocket listener,
 - add more ADRs for protocol versioning, transport replacement, and hardware provider model.
 

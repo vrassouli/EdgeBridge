@@ -6,7 +6,7 @@ using EdgeBridge.Transport.WebSockets;
 
 namespace EdgeBridge.Client;
 
-internal sealed class RemoteDevice : IDevice, IRemoteDeviceConnection, IAsyncDisposable
+internal sealed class RemoteDevice : IDevice, IRemoteDeviceConnection, IAgentConfigurationClient, IAsyncDisposable
 {
     private static readonly TimeSpan[] ReconnectDelays =
     [
@@ -61,11 +61,36 @@ internal sealed class RemoteDevice : IDevice, IRemoteDeviceConnection, IAsyncDis
 
     public IDigitalOutput DigitalOutput(int channel) => new RemoteDigitalOutput(this, channel);
 
-    public IDigitalInput DigitalInput(int channel) => new RemoteDigitalInput(this, channel);
+    public IDigitalInput DigitalInput(int channel) => DigitalInput(channel, DigitalInputOptions.Default);
+
+    public IDigitalInput DigitalInput(int channel, DigitalInputOptions options) => new RemoteDigitalInput(this, channel, options);
 
     public IPwmOutput PwmOutput(int channel) => new RemotePwmOutput(this, channel);
 
     public IMotor Motor(string name) => new RemoteMotor(this, name);
+
+    public II2cDevice I2cDevice(int bus, int address) => new RemoteI2cDevice(this, bus, address);
+
+    public ICamera Camera(string cameraId) => new RemoteCamera(this, cameraId);
+
+    public async ValueTask<AgentConfigDto> GetAgentConfigAsync(CancellationToken cancellationToken = default)
+    {
+        var response = await SendCommandAsync(EdgeBridgeCommands.DeviceConfigGet, new { }, cancellationToken).ConfigureAwait(false);
+        var payload = ProtocolJson.ReadPayload<AgentConfigPayload>(response.Payload);
+        return payload?.Config ?? throw new InvalidOperationException("Agent returned an empty config payload.");
+    }
+
+    public async ValueTask<AgentConfigUpdateResult> UpdateAgentConfigAsync(
+        AgentConfigDto config,
+        CancellationToken cancellationToken = default)
+    {
+        var response = await SendCommandAsync(
+            EdgeBridgeCommands.DeviceConfigUpdate,
+            new AgentConfigPayload(config),
+            cancellationToken).ConfigureAwait(false);
+        return ProtocolJson.ReadPayload<AgentConfigUpdateResult>(response.Payload)
+            ?? throw new InvalidOperationException("Agent returned an empty config update payload.");
+    }
 
     internal ValueTask SetDigitalOutputAsync(int channel, bool isHigh, CancellationToken cancellationToken)
     {
@@ -75,11 +100,14 @@ internal sealed class RemoteDevice : IDevice, IRemoteDeviceConnection, IAsyncDis
             cancellationToken);
     }
 
-    internal async ValueTask<DigitalInputState> ReadDigitalInputAsync(int channel, CancellationToken cancellationToken)
+    internal async ValueTask<DigitalInputState> ReadDigitalInputAsync(
+        int channel,
+        DigitalInputOptions options,
+        CancellationToken cancellationToken)
     {
         var response = await SendCommandAsync(
             EdgeBridgeCommands.DigitalRead,
-            new DigitalReadPayload(channel),
+            new DigitalReadPayload(channel, options.PullMode),
             cancellationToken).ConfigureAwait(false);
         var result = ProtocolJson.ReadPayload<DigitalReadResult>(response.Payload)
             ?? throw new InvalidOperationException("Agent returned an empty digital read payload.");
@@ -89,6 +117,7 @@ internal sealed class RemoteDevice : IDevice, IRemoteDeviceConnection, IAsyncDis
 
     internal async IAsyncEnumerable<DigitalInputState> WatchDigitalInputAsync(
         int channel,
+        DigitalInputOptions options,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
     {
         var subscriptionId = $"digital:{channel}:{Guid.NewGuid():n}";
@@ -100,7 +129,7 @@ internal sealed class RemoteDevice : IDevice, IRemoteDeviceConnection, IAsyncDis
             Type = MessageTypes.SubscribeRequest,
             DeviceId = DeviceId,
             Event = EdgeBridgeCommands.DigitalWatch,
-            Payload = ProtocolJson.ToJsonElement(new DigitalWatchPayload(channel)),
+            Payload = ProtocolJson.ToJsonElement(new DigitalWatchPayload(channel, options.PullMode)),
             CorrelationId = subscriptionId
         };
 
@@ -142,6 +171,64 @@ internal sealed class RemoteDevice : IDevice, IRemoteDeviceConnection, IAsyncDis
     internal ValueTask SetMotorSpeedAsync(string name, double speed, CancellationToken cancellationToken)
     {
         return SendCommandWithoutResultAsync(EdgeBridgeCommands.MotorSetSpeed, new MotorSetSpeedPayload(name, speed), cancellationToken);
+    }
+
+    internal async ValueTask<byte[]> ReadI2cRegisterAsync(
+        int bus,
+        int address,
+        int register,
+        int length,
+        CancellationToken cancellationToken)
+    {
+        var response = await SendCommandAsync(
+            EdgeBridgeCommands.I2cReadRegister,
+            new I2cReadRegisterPayload(bus, address, register, length),
+            cancellationToken).ConfigureAwait(false);
+        var result = ProtocolJson.ReadPayload<I2cReadRegisterResult>(response.Payload)
+            ?? throw new InvalidOperationException("Agent returned an empty I2C read payload.");
+        return result.Data;
+    }
+
+    internal ValueTask WriteI2cRegisterAsync(
+        int bus,
+        int address,
+        int register,
+        IReadOnlyList<byte> data,
+        CancellationToken cancellationToken)
+    {
+        return SendCommandWithoutResultAsync(
+            EdgeBridgeCommands.I2cWriteRegister,
+            new I2cWriteRegisterPayload(bus, address, register, data.ToArray()),
+            cancellationToken);
+    }
+
+    internal ValueTask StartCameraAsync(string cameraId, CancellationToken cancellationToken)
+    {
+        return SendCommandWithoutResultAsync(
+            EdgeBridgeCommands.CameraStartStream,
+            new CameraStreamPayload(cameraId),
+            cancellationToken);
+    }
+
+    internal ValueTask StopCameraAsync(string cameraId, CancellationToken cancellationToken)
+    {
+        return SendCommandWithoutResultAsync(
+            EdgeBridgeCommands.CameraStopStream,
+            new CameraStreamPayload(cameraId),
+            cancellationToken);
+    }
+
+    internal async ValueTask<CameraStatus> GetCameraStatusAsync(
+        string cameraId,
+        CancellationToken cancellationToken)
+    {
+        var response = await SendCommandAsync(
+            EdgeBridgeCommands.CameraGetStatus,
+            new CameraStreamPayload(cameraId),
+            cancellationToken).ConfigureAwait(false);
+        var result = ProtocolJson.ReadPayload<CameraStatusPayload>(response.Payload)
+            ?? throw new InvalidOperationException("Agent returned an empty camera status payload.");
+        return result.Status;
     }
 
     private async ValueTask ConnectTransportAsync(EdgeConnectionState connectingState, CancellationToken cancellationToken)
@@ -404,10 +491,12 @@ internal sealed class RemoteDigitalOutput : IDigitalOutput
 internal sealed class RemoteDigitalInput : IDigitalInput
 {
     private readonly RemoteDevice _device;
+    private readonly DigitalInputOptions _options;
 
-    public RemoteDigitalInput(RemoteDevice device, int channel)
+    public RemoteDigitalInput(RemoteDevice device, int channel, DigitalInputOptions options)
     {
         _device = device;
+        _options = options;
         Channel = new DigitalChannel(channel);
     }
 
@@ -415,12 +504,12 @@ internal sealed class RemoteDigitalInput : IDigitalInput
 
     public ValueTask<DigitalInputState> ReadAsync(CancellationToken cancellationToken = default)
     {
-        return _device.ReadDigitalInputAsync(Channel.Number, cancellationToken);
+        return _device.ReadDigitalInputAsync(Channel.Number, _options, cancellationToken);
     }
 
     public IAsyncEnumerable<DigitalInputState> WatchAsync(CancellationToken cancellationToken = default)
     {
-        return _device.WatchDigitalInputAsync(Channel.Number, cancellationToken);
+        return _device.WatchDigitalInputAsync(Channel.Number, _options, cancellationToken);
     }
 }
 
@@ -462,5 +551,65 @@ internal sealed class RemoteMotor : IMotor
     public ValueTask StopAsync(CancellationToken cancellationToken = default)
     {
         return SetSpeedAsync(0, cancellationToken);
+    }
+}
+
+internal sealed class RemoteI2cDevice : II2cDevice
+{
+    private readonly RemoteDevice _device;
+
+    public RemoteI2cDevice(RemoteDevice device, int bus, int address)
+    {
+        _device = device;
+        Bus = new I2cBus(bus);
+        Address = new I2cAddress(address);
+    }
+
+    public I2cBus Bus { get; }
+
+    public I2cAddress Address { get; }
+
+    public ValueTask<byte[]> ReadRegisterAsync(
+        int register,
+        int length,
+        CancellationToken cancellationToken = default)
+    {
+        return _device.ReadI2cRegisterAsync(Bus.Number, Address.Value, register, length, cancellationToken);
+    }
+
+    public ValueTask WriteRegisterAsync(
+        int register,
+        IReadOnlyList<byte> data,
+        CancellationToken cancellationToken = default)
+    {
+        return _device.WriteI2cRegisterAsync(Bus.Number, Address.Value, register, data, cancellationToken);
+    }
+}
+
+internal sealed class RemoteCamera : ICamera
+{
+    private readonly RemoteDevice _device;
+
+    public RemoteCamera(RemoteDevice device, string cameraId)
+    {
+        _device = device;
+        CameraId = cameraId;
+    }
+
+    public string CameraId { get; }
+
+    public ValueTask StartStreamAsync(CancellationToken cancellationToken = default)
+    {
+        return _device.StartCameraAsync(CameraId, cancellationToken);
+    }
+
+    public ValueTask StopStreamAsync(CancellationToken cancellationToken = default)
+    {
+        return _device.StopCameraAsync(CameraId, cancellationToken);
+    }
+
+    public ValueTask<CameraStatus> GetStatusAsync(CancellationToken cancellationToken = default)
+    {
+        return _device.GetCameraStatusAsync(CameraId, cancellationToken);
     }
 }

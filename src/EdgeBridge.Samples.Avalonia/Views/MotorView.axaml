@@ -1,0 +1,27 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="EdgeBridge.Samples.Avalonia.Views.MotorView">
+  <StackPanel Spacing="16">
+    <Grid ColumnDefinitions="*,Auto">
+      <TextBlock Text="Motors" Classes="pageTitle" />
+      <Button Grid.Column="1" Content="Add Motor" Command="{Binding AddCommand}" Classes="primary" />
+    </Grid>
+    <ItemsControl ItemsSource="{Binding Motors}">
+      <ItemsControl.ItemTemplate>
+        <DataTemplate>
+          <Border Classes="itemCard">
+            <Grid ColumnDefinitions="1.2*,*,80,Auto,Auto,Auto" ColumnSpacing="10" RowDefinitions="Auto,Auto">
+              <TextBox Text="{Binding Name}" />
+              <Slider Grid.Column="1" Value="{Binding Speed}" Minimum="-1" Maximum="1" TickFrequency="0.1" />
+              <TextBlock Grid.Column="2" Text="{Binding SpeedPercent, StringFormat={}{0}%}" VerticalAlignment="Center" FontWeight="SemiBold" />
+              <Button Grid.Column="3" Content="Apply" Command="{Binding ApplyCommand}" Classes="primary" />
+              <Button Grid.Column="4" Content="Stop" Command="{Binding StopCommand}" />
+              <Button Grid.Column="5" Content="Remove" Command="{Binding RemoveCommand}" />
+              <TextBlock Grid.Row="1" Grid.ColumnSpan="6" Text="{Binding Status}" Foreground="#647086" Margin="0,8,0,0" />
+            </Grid>
+          </Border>
+        </DataTemplate>
+      </ItemsControl.ItemTemplate>
+    </ItemsControl>
+  </StackPanel>
+</UserControl>

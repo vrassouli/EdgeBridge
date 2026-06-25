@@ -1,0 +1,33 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="EdgeBridge.Samples.Avalonia.Views.OverviewView">
+  <StackPanel Spacing="16">
+    <TextBlock Text="Overview" Classes="pageTitle" />
+    <UniformGrid Columns="2" Rows="2">
+      <Border Classes="metricCard">
+        <StackPanel>
+          <TextBlock Text="Connection" Classes="metricLabel" />
+          <TextBlock Text="{Binding ConnectionState}" Classes="metricValue" />
+        </StackPanel>
+      </Border>
+      <Border Classes="metricCard">
+        <StackPanel>
+          <TextBlock Text="Device" Classes="metricLabel" />
+          <TextBlock Text="{Binding DeviceInfoText}" Classes="metricValue" TextWrapping="Wrap" />
+        </StackPanel>
+      </Border>
+      <Border Classes="metricCard">
+        <StackPanel>
+          <TextBlock Text="Capabilities" Classes="metricLabel" />
+          <TextBlock Text="{Binding CapabilitiesText}" TextWrapping="Wrap" Foreground="#475067" />
+        </StackPanel>
+      </Border>
+      <Border Classes="metricCard">
+        <StackPanel>
+          <TextBlock Text="Profile Store" Classes="metricLabel" />
+          <TextBlock Text="{Binding ProfileStorePath}" TextWrapping="Wrap" Foreground="#475067" />
+        </StackPanel>
+      </Border>
+    </UniformGrid>
+  </StackPanel>
+</UserControl>

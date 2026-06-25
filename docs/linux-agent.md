@@ -57,11 +57,13 @@ journalctl -u edgebridge-agent -f
 When no `--config` argument is provided on Linux, the Agent first tries `/etc/edgebridge/agent.json`.
 If that file does not exist, it uses built-in development defaults.
 
-From your MacBook, run a sample against the device:
+From your MacBook, run the GUI sample and add a profile that points to the device:
 
 ```bash
-dotnet run --project src/EdgeBridge.Samples.Console -- ws://DEVICE_IP:8080/edgebridge/ blink
+dotnet run --project src/EdgeBridge.Samples.Avalonia
 ```
+
+Use an endpoint such as `ws://DEVICE_IP:8080/edgebridge/`.
 
 ## Development Raspberry Pi
 
@@ -79,20 +81,10 @@ ssh me@rpi4-dev.local 'cd ~/edgebridge-agent && ./EdgeBridge.Agent --config=agen
 Then verify client connectivity from the Mac:
 
 ```bash
-dotnet run --project src/EdgeBridge.Samples.Console -- ws://rpi4-dev.local:8080/edgebridge/ blink
+dotnet run --project src/EdgeBridge.Samples.Avalonia
 ```
 
-To verify PWM with an LED fade on PWM channel `0`, run:
-
-```bash
-dotnet run --project src/EdgeBridge.Samples.Console -- ws://rpi4-dev.local:8080/edgebridge/ fade
-```
-
-Pass a channel number after `fade` when the Agent exposes a different PWM channel:
-
-```bash
-dotnet run --project src/EdgeBridge.Samples.Console -- ws://rpi4-dev.local:8080/edgebridge/ fade 1
-```
+Add a profile for `ws://rpi4-dev.local:8080/edgebridge/`, then use the GPIO, PWM, motor, I2C, camera, and Agent Config pages to verify the exposed capabilities.
 
 ## Real GPIO backend
 
@@ -114,7 +106,9 @@ To use physical GPIO lines, set the hardware backend in `/etc/edgebridge/agent.j
         "invertDirection": false,
         "maxDutyCycle": 1.0
       }
-    }
+    },
+    "i2cDevices": [],
+    "cameras": []
   },
   "transports": {
     "webSocket": {
@@ -125,6 +119,7 @@ To use physical GPIO lines, set the hardware backend in `/etc/edgebridge/agent.j
   "modules": {
     "gpio": true,
     "pwm": true,
+    "i2c": false,
     "camera": false
   }
 }
@@ -142,6 +137,8 @@ Channel numbers are Linux GPIO line offsets on the configured GPIO chip. On many
 ```bash
 gpioinfo
 ```
+
+Digital inputs default to plain floating inputs. If an input line is disconnected, the physical pin may rapidly switch between High and Low due to electrical noise. Give watched inputs a defined idle state with a pull-up or pull-down resistor, or connect them through hardware that actively drives both states. The client API and GUI profile can request `Floating`, `PullDown`, or `PullUp`; the `linux-gpio` backend maps those options to the platform input modes, including Raspberry Pi internal pull resistors when supported by the OS driver.
 
 ## Motor Mapping
 
@@ -181,6 +178,8 @@ sudo usermod -aG gpio edgebridge
 sudo systemctl restart edgebridge-agent
 ```
 
-The Avalonia RGB LED sample toggles LED channels through `IDigitalOutput`, so it does not require Linux PWM support.
+The Avalonia GUI can toggle GPIO outputs through `IDigitalOutput`, so basic GPIO verification does not require Linux PWM support.
 
 If PWM is enabled, the backend uses Linux sysfs PWM through `pwmChip` and `pwmFrequency`. Raspberry Pi OS does not always expose `/sys/class/pwm/pwmchip0` by default. On Raspberry Pi OS Bookworm, hardware PWM is configured through `/boot/firmware/config.txt`; older images may use `/boot/config.txt`. For example, `dtoverlay=pwm-2chan` exposes hardware PWM on GPIO 18 and 19 after a reboot. Use `ls /sys/class/pwm` to find the enabled PWM chip number, then set `hardware.pwmChip` to match. Disable `"pwm"` in `modules` if your board image does not expose PWM through sysfs yet.
+
+The `linux-gpio` backend currently reports clear unsupported errors for real I2C register access and camera control. Mock devices support both features for GUI and protocol testing.

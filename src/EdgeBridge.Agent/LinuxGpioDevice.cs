@@ -42,6 +42,16 @@ internal sealed class LinuxGpioDevice : IDevice, IDisposable
             capabilities.Add("motor");
         }
 
+        if (_config.Modules.I2c)
+        {
+            capabilities.Add("i2c");
+        }
+
+        if (_config.Modules.Camera)
+        {
+            capabilities.Add("camera");
+        }
+
         return ValueTask.FromResult(new DeviceInfo(
             DeviceId,
             _config.DeviceName,
@@ -51,7 +61,9 @@ internal sealed class LinuxGpioDevice : IDevice, IDisposable
 
     public IDigitalOutput DigitalOutput(int channel) => new LinuxDigitalOutput(this, channel);
 
-    public IDigitalInput DigitalInput(int channel) => new LinuxDigitalInput(this, channel);
+    public IDigitalInput DigitalInput(int channel) => DigitalInput(channel, DigitalInputOptions.Default);
+
+    public IDigitalInput DigitalInput(int channel, DigitalInputOptions options) => new LinuxDigitalInput(this, channel, options);
 
     public IPwmOutput PwmOutput(int channel) => new LinuxPwmOutput(this, channel);
 
@@ -64,6 +76,10 @@ internal sealed class LinuxGpioDevice : IDevice, IDisposable
 
         return new LinuxMappedMotor(this, name, mapping);
     }
+
+    public II2cDevice I2cDevice(int bus, int address) => new UnsupportedI2cDevice(bus, address);
+
+    public ICamera Camera(string cameraId) => new UnsupportedCamera(cameraId);
 
     public void Dispose()
     {
@@ -88,14 +104,17 @@ internal sealed class LinuxGpioDevice : IDevice, IDisposable
         return ValueTask.CompletedTask;
     }
 
-    internal ValueTask<DigitalInputState> ReadDigitalInputAsync(int channel, CancellationToken cancellationToken)
+    internal ValueTask<DigitalInputState> ReadDigitalInputAsync(
+        int channel,
+        DigitalInputOptions options,
+        CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
         PinValue value;
         lock (_gpioLock)
         {
-            OpenPin(channel, PinMode.Input);
+            OpenPin(channel, ToPinMode(options.PullMode));
             value = _gpio.Read(channel);
         }
 
@@ -104,6 +123,7 @@ internal sealed class LinuxGpioDevice : IDevice, IDisposable
 
     internal async IAsyncEnumerable<DigitalInputState> WatchDigitalInputAsync(
         int channel,
+        DigitalInputOptions options,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         var events = Channel.CreateUnbounded<DigitalInputState>();
@@ -119,7 +139,7 @@ internal sealed class LinuxGpioDevice : IDevice, IDisposable
 
         lock (_gpioLock)
         {
-            OpenPin(channel, PinMode.Input);
+            OpenPin(channel, ToPinMode(options.PullMode));
             _gpio.RegisterCallbackForPinValueChangedEvent(
                 channel,
                 PinEventTypes.Rising | PinEventTypes.Falling,
@@ -128,7 +148,7 @@ internal sealed class LinuxGpioDevice : IDevice, IDisposable
 
         try
         {
-            yield return await ReadDigitalInputAsync(channel, cancellationToken).ConfigureAwait(false);
+            yield return await ReadDigitalInputAsync(channel, options, cancellationToken).ConfigureAwait(false);
 
             await foreach (var state in events.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
             {
@@ -206,11 +226,22 @@ internal sealed class LinuxGpioDevice : IDevice, IDisposable
 
     private IoPwmChannel CreatePwmChannel(int channel)
     {
-        return IoPwmChannel.Create(
-            _config.Hardware.PwmChip,
-            channel,
-            _config.Hardware.PwmFrequency,
-            0);
+        try
+        {
+            return IoPwmChannel.Create(
+                _config.Hardware.PwmChip,
+                channel,
+                _config.Hardware.PwmFrequency,
+                0);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw new InvalidOperationException(
+                $"PWM channel {channel} could not be opened on pwmChip {_config.Hardware.PwmChip} at {_config.Hardware.PwmFrequency} Hz. " +
+                "Verify that Linux sysfs PWM is enabled on the device, use 'ls /sys/class/pwm' to find the available pwmchip number, " +
+                "then update hardware.pwmChip or disable the pwm module if sysfs PWM is not available.",
+                ex);
+        }
     }
 
     private static GpioController CreateGpioController(int gpioChip)
@@ -262,6 +293,16 @@ internal sealed class LinuxGpioDevice : IDevice, IDisposable
             value == PinValue.High,
             DateTimeOffset.UtcNow);
     }
+
+    private static PinMode ToPinMode(DigitalInputPullMode pullMode)
+    {
+        return pullMode switch
+        {
+            DigitalInputPullMode.PullDown => PinMode.InputPullDown,
+            DigitalInputPullMode.PullUp => PinMode.InputPullUp,
+            _ => PinMode.Input
+        };
+    }
 }
 
 internal sealed class LinuxDigitalOutput : IDigitalOutput
@@ -285,10 +326,12 @@ internal sealed class LinuxDigitalOutput : IDigitalOutput
 internal sealed class LinuxDigitalInput : IDigitalInput
 {
     private readonly LinuxGpioDevice _device;
+    private readonly DigitalInputOptions _options;
 
-    public LinuxDigitalInput(LinuxGpioDevice device, int channel)
+    public LinuxDigitalInput(LinuxGpioDevice device, int channel, DigitalInputOptions options)
     {
         _device = device;
+        _options = options;
         Channel = new DigitalChannel(channel);
     }
 
@@ -296,12 +339,12 @@ internal sealed class LinuxDigitalInput : IDigitalInput
 
     public ValueTask<DigitalInputState> ReadAsync(CancellationToken cancellationToken = default)
     {
-        return _device.ReadDigitalInputAsync(Channel.Number, cancellationToken);
+        return _device.ReadDigitalInputAsync(Channel.Number, _options, cancellationToken);
     }
 
     public IAsyncEnumerable<DigitalInputState> WatchAsync(CancellationToken cancellationToken = default)
     {
-        return _device.WatchDigitalInputAsync(Channel.Number, cancellationToken);
+        return _device.WatchDigitalInputAsync(Channel.Number, _options, cancellationToken);
     }
 }
 
@@ -367,5 +410,64 @@ internal sealed class LinuxMappedMotor : IMotor
     public ValueTask StopAsync(CancellationToken cancellationToken = default)
     {
         return SetSpeedAsync(0, cancellationToken);
+    }
+}
+
+internal sealed class UnsupportedI2cDevice : II2cDevice
+{
+    public UnsupportedI2cDevice(int bus, int address)
+    {
+        Bus = new I2cBus(bus);
+        Address = new I2cAddress(address);
+    }
+
+    public I2cBus Bus { get; }
+
+    public I2cAddress Address { get; }
+
+    public ValueTask<byte[]> ReadRegisterAsync(
+        int register,
+        int length,
+        CancellationToken cancellationToken = default)
+    {
+        throw new NotSupportedException(
+            "The linux-gpio backend does not implement I2C register access yet.");
+    }
+
+    public ValueTask WriteRegisterAsync(
+        int register,
+        IReadOnlyList<byte> data,
+        CancellationToken cancellationToken = default)
+    {
+        throw new NotSupportedException(
+            "The linux-gpio backend does not implement I2C register access yet.");
+    }
+}
+
+internal sealed class UnsupportedCamera : ICamera
+{
+    public UnsupportedCamera(string cameraId)
+    {
+        CameraId = cameraId;
+    }
+
+    public string CameraId { get; }
+
+    public ValueTask StartStreamAsync(CancellationToken cancellationToken = default)
+    {
+        throw new NotSupportedException(
+            "The linux-gpio backend does not implement camera control yet.");
+    }
+
+    public ValueTask StopStreamAsync(CancellationToken cancellationToken = default)
+    {
+        throw new NotSupportedException(
+            "The linux-gpio backend does not implement camera control yet.");
+    }
+
+    public ValueTask<CameraStatus> GetStatusAsync(CancellationToken cancellationToken = default)
+    {
+        throw new NotSupportedException(
+            "The linux-gpio backend does not implement camera control yet.");
     }
 }

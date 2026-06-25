@@ -1,0 +1,31 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="EdgeBridge.Samples.Avalonia.Views.I2cView">
+  <StackPanel Spacing="16">
+    <Grid ColumnDefinitions="*,Auto">
+      <TextBlock Text="I2C Register Access" Classes="pageTitle" />
+      <Button Grid.Column="1" Content="Add Device" Command="{Binding AddCommand}" Classes="primary" />
+    </Grid>
+    <ItemsControl ItemsSource="{Binding Devices}">
+      <ItemsControl.ItemTemplate>
+        <DataTemplate>
+          <Border Classes="itemCard">
+            <Grid ColumnDefinitions="1.2*,70,90,90,90,1.2*,1.2*,Auto,Auto,Auto" ColumnSpacing="8" RowDefinitions="Auto,Auto">
+              <TextBox Text="{Binding Name}" />
+              <NumericUpDown Grid.Column="1" Value="{Binding Bus}" Minimum="0" Maximum="16" FormatString="0" />
+              <NumericUpDown Grid.Column="2" Value="{Binding Address}" Minimum="0" Maximum="127" FormatString="0" />
+              <NumericUpDown Grid.Column="3" Value="{Binding Register}" Minimum="0" Maximum="65535" FormatString="0" />
+              <NumericUpDown Grid.Column="4" Value="{Binding ReadLength}" Minimum="1" Maximum="64" FormatString="0" />
+              <TextBox Grid.Column="5" Text="{Binding WriteBytes}" Watermark="00 FF" />
+              <TextBox Grid.Column="6" Text="{Binding LastRead}" IsReadOnly="True" Watermark="Last read" />
+              <Button Grid.Column="7" Content="Read" Command="{Binding ReadCommand}" />
+              <Button Grid.Column="8" Content="Write" Command="{Binding WriteCommand}" Classes="primary" />
+              <Button Grid.Column="9" Content="Remove" Command="{Binding RemoveCommand}" />
+              <TextBlock Grid.Row="1" Grid.ColumnSpan="10" Text="{Binding Status}" Foreground="#647086" Margin="0,8,0,0" />
+            </Grid>
+          </Border>
+        </DataTemplate>
+      </ItemsControl.ItemTemplate>
+    </ItemsControl>
+  </StackPanel>
+</UserControl>

@@ -10,7 +10,7 @@ EdgeBridge must let application code interact with local, remote, or simulated h
 
 ## Decision
 
-The MVP is a .NET 10 solution with separate projects for abstractions, protocol, WebSocket transport, Agent, Client SDK, provisioning contracts, and console samples.
+The MVP is a .NET 10 solution with separate projects for abstractions, protocol, WebSocket transport, Agent, Client SDK, provisioning contracts, and an Avalonia GUI sample.
 
 Application code depends on `EdgeBridge.Abstractions`. The Agent hosts a local `IDevice` implementation. The Client SDK exposes remote proxy implementations of the same interfaces. Communication uses versioned JSON protocol messages over WebSockets.
 
@@ -22,4 +22,3 @@ The first Agent hardware implementation is a mock provider. Real GPIO, camera, a
 - The Agent can run on Linux/Raspberry Pi without native GPIO dependencies.
 - Transport and hardware providers remain replaceable.
 - The protocol can evolve independently from public application-facing abstractions.
-
