@@ -120,11 +120,16 @@ internal sealed class AgentConfigStore
             _lock.Release();
         }
 
-        return new AgentConfigUpdateResult(
+        var result = new AgentConfigUpdateResult(
             Accepted: true,
             RestartRequired: true,
             Message: "Configuration was saved. Restart the Agent for runtime changes to take effect.",
             Config: Current.ToDto());
+
+        Console.WriteLine($"EdgeBridge Agent configuration updated: {result.Message}");
+        Console.WriteLine($"EdgeBridge Agent restart required. Restart the Agent before expecting runtime changes from {Path} to take effect.");
+
+        return result;
     }
 
     private static void Validate(AgentConfig config)

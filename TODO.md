@@ -9,6 +9,7 @@
 - Replaced narrow samples with a professional all-in-one Avalonia GUI sample for device profiles, GPIO, PWM, motors, I2C, camera control, and Agent config updates.
 - Added shared Agent config contracts plus durable config update protocol with restart-required semantics.
 - Added I2C register access and camera control/status contracts with remote client and mock Agent support.
+- Added real Linux I2C register access for the `linux-gpio` backend using Linux I2C device files.
 
 ## Next Phases
 
@@ -17,5 +18,5 @@
 - Add authentication and authorization to the WebSocket transport.
 - Add provisioning implementations for WiFi and Bluetooth setup.
 - Add camera stream protocol and transport support.
-- Implement real Linux I2C and camera hardware providers.
+- Implement a real Linux camera hardware provider.
 - Add ADRs for protocol versioning and transport replacement.

@@ -83,6 +83,8 @@ public sealed record I2cDeviceProfile
 {
     public string Name { get; set; } = "I2C Device";
 
+    public I2cValueFormat ValueFormat { get; set; }
+
     public int Bus { get; set; } = 1;
 
     public int Address { get; set; }
@@ -94,6 +96,12 @@ public sealed record I2cDeviceProfile
     public string WriteBytes { get; set; } = "00";
 
     public string LastRead { get; set; } = "";
+}
+
+public enum I2cValueFormat
+{
+    Hex,
+    Decimal
 }
 
 public sealed record CameraProfile

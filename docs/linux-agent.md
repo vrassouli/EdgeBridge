@@ -182,4 +182,13 @@ The Avalonia GUI can toggle GPIO outputs through `IDigitalOutput`, so basic GPIO
 
 If PWM is enabled, the backend uses Linux sysfs PWM through `pwmChip` and `pwmFrequency`. Raspberry Pi OS does not always expose `/sys/class/pwm/pwmchip0` by default. On Raspberry Pi OS Bookworm, hardware PWM is configured through `/boot/firmware/config.txt`; older images may use `/boot/config.txt`. For example, `dtoverlay=pwm-2chan` exposes hardware PWM on GPIO 18 and 19 after a reboot. Use `ls /sys/class/pwm` to find the enabled PWM chip number, then set `hardware.pwmChip` to match. Disable `"pwm"` in `modules` if your board image does not expose PWM through sysfs yet.
 
-The `linux-gpio` backend currently reports clear unsupported errors for real I2C register access and camera control. Mock devices support both features for GUI and protocol testing.
+If I2C is enabled, the backend uses Linux I2C device files such as `/dev/i2c-1` for 8-bit register reads and writes. The service account must be allowed to access the bus; on Raspberry Pi OS this usually means adding it to the `i2c` group:
+
+```bash
+sudo usermod -aG i2c edgebridge
+sudo systemctl restart edgebridge-agent
+```
+
+Use `i2cdetect -l` to list available buses, then set each configured device's `bus` and `address` to match the hardware. The current EdgeBridge I2C register API sends one 8-bit register address followed by the read or write payload.
+
+The `linux-gpio` backend currently reports clear unsupported errors for real camera control. Mock devices support camera controls for GUI and protocol testing.

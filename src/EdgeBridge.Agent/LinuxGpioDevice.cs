@@ -1,11 +1,15 @@
 using System.Collections.Concurrent;
 using System.Device.Gpio;
 using System.Device.Gpio.Drivers;
+using System.Device.I2c;
 using System.Device.Pwm;
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 using EdgeBridge.Abstractions;
+using AbstractionsI2cAddress = EdgeBridge.Abstractions.I2cAddress;
+using AbstractionsI2cBus = EdgeBridge.Abstractions.I2cBus;
 using AbstractionsPwmChannel = EdgeBridge.Abstractions.PwmChannel;
+using IoI2cDevice = System.Device.I2c.I2cDevice;
 using IoPwmChannel = System.Device.Pwm.PwmChannel;
 
 namespace EdgeBridge.Agent;
@@ -16,6 +20,7 @@ internal sealed class LinuxGpioDevice : IDevice, IDisposable
     private readonly GpioController _gpio;
     private readonly object _gpioLock = new();
     private readonly ConcurrentDictionary<int, IoPwmChannel> _pwmChannels = new();
+    private readonly ConcurrentDictionary<I2cDeviceKey, IoI2cDevice> _i2cDevices = new();
 
     public LinuxGpioDevice(AgentConfig config)
     {
@@ -77,7 +82,7 @@ internal sealed class LinuxGpioDevice : IDevice, IDisposable
         return new LinuxMappedMotor(this, name, mapping);
     }
 
-    public II2cDevice I2cDevice(int bus, int address) => new UnsupportedI2cDevice(bus, address);
+    public II2cDevice I2cDevice(int bus, int address) => new LinuxI2cDevice(this, bus, address);
 
     public ICamera Camera(string cameraId) => new UnsupportedCamera(cameraId);
 
@@ -86,6 +91,11 @@ internal sealed class LinuxGpioDevice : IDevice, IDisposable
         foreach (var pwmChannel in _pwmChannels.Values)
         {
             pwmChannel.Dispose();
+        }
+
+        foreach (var i2cDevice in _i2cDevices.Values)
+        {
+            i2cDevice.Dispose();
         }
 
         _gpio.Dispose();
@@ -224,6 +234,59 @@ internal sealed class LinuxGpioDevice : IDevice, IDisposable
         await SetPwmAsync(mapping.PwmChannel, dutyCycle, cancellationToken).ConfigureAwait(false);
     }
 
+    internal ValueTask<byte[]> ReadI2cRegisterAsync(
+        int bus,
+        int address,
+        int register,
+        int length,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        EnsureI2cEnabled();
+        ValidateI2cRegister(register);
+
+        if (length <= 0)
+        {
+            throw new InvalidOperationException("I2C read length must be greater than zero.");
+        }
+
+        var device = GetI2cDevice(bus, address);
+        var registerBuffer = new[] { checked((byte)register) };
+        var readBuffer = new byte[length];
+        device.WriteRead(registerBuffer, readBuffer);
+
+        return ValueTask.FromResult(readBuffer);
+    }
+
+    internal ValueTask WriteI2cRegisterAsync(
+        int bus,
+        int address,
+        int register,
+        IReadOnlyList<byte> data,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        EnsureI2cEnabled();
+        ValidateI2cRegister(register);
+
+        if (data.Count == 0)
+        {
+            throw new InvalidOperationException("I2C write payload must contain at least one byte.");
+        }
+
+        var device = GetI2cDevice(bus, address);
+        var writeBuffer = new byte[data.Count + 1];
+        writeBuffer[0] = checked((byte)register);
+
+        for (var i = 0; i < data.Count; i++)
+        {
+            writeBuffer[i + 1] = data[i];
+        }
+
+        device.Write(writeBuffer);
+        return ValueTask.CompletedTask;
+    }
+
     private IoPwmChannel CreatePwmChannel(int channel)
     {
         try
@@ -241,6 +304,50 @@ internal sealed class LinuxGpioDevice : IDevice, IDisposable
                 "Verify that Linux sysfs PWM is enabled on the device, use 'ls /sys/class/pwm' to find the available pwmchip number, " +
                 "then update hardware.pwmChip or disable the pwm module if sysfs PWM is not available.",
                 ex);
+        }
+    }
+
+    private IoI2cDevice GetI2cDevice(int bus, int address)
+    {
+        if (bus < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(bus), bus, "I2C bus number must be non-negative.");
+        }
+
+        if (address is < 0 or > 0x7F)
+        {
+            throw new ArgumentOutOfRangeException(nameof(address), address, "I2C address must be a 7-bit address from 0x00 to 0x7F.");
+        }
+
+        return _i2cDevices.GetOrAdd(new I2cDeviceKey(bus, address), static key =>
+        {
+            try
+            {
+                return IoI2cDevice.Create(new I2cConnectionSettings(key.Bus, key.Address));
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                throw new InvalidOperationException(
+                    $"I2C device 0x{key.Address:X2} could not be opened on bus {key.Bus}. " +
+                    $"Verify that /dev/i2c-{key.Bus} exists, the Agent user can access it, and the device address is correct.",
+                    ex);
+            }
+        });
+    }
+
+    private void EnsureI2cEnabled()
+    {
+        if (!_config.Modules.I2c)
+        {
+            throw new NotSupportedException("I2C is disabled in agent configuration.");
+        }
+    }
+
+    private static void ValidateI2cRegister(int register)
+    {
+        if (register is < 0 or > 0xFF)
+        {
+            throw new ArgumentOutOfRangeException(nameof(register), register, "I2C register must be an 8-bit value from 0x00 to 0xFF.");
         }
     }
 
@@ -304,6 +411,8 @@ internal sealed class LinuxGpioDevice : IDevice, IDisposable
         };
     }
 }
+
+internal readonly record struct I2cDeviceKey(int Bus, int Address);
 
 internal sealed class LinuxDigitalOutput : IDigitalOutput
 {
@@ -413,25 +522,27 @@ internal sealed class LinuxMappedMotor : IMotor
     }
 }
 
-internal sealed class UnsupportedI2cDevice : II2cDevice
+internal sealed class LinuxI2cDevice : II2cDevice
 {
-    public UnsupportedI2cDevice(int bus, int address)
+    private readonly LinuxGpioDevice _device;
+
+    public LinuxI2cDevice(LinuxGpioDevice device, int bus, int address)
     {
-        Bus = new I2cBus(bus);
-        Address = new I2cAddress(address);
+        _device = device;
+        Bus = new AbstractionsI2cBus(bus);
+        Address = new AbstractionsI2cAddress(address);
     }
 
-    public I2cBus Bus { get; }
+    public AbstractionsI2cBus Bus { get; }
 
-    public I2cAddress Address { get; }
+    public AbstractionsI2cAddress Address { get; }
 
     public ValueTask<byte[]> ReadRegisterAsync(
         int register,
         int length,
         CancellationToken cancellationToken = default)
     {
-        throw new NotSupportedException(
-            "The linux-gpio backend does not implement I2C register access yet.");
+        return _device.ReadI2cRegisterAsync(Bus.Number, Address.Value, register, length, cancellationToken);
     }
 
     public ValueTask WriteRegisterAsync(
@@ -439,8 +550,7 @@ internal sealed class UnsupportedI2cDevice : II2cDevice
         IReadOnlyList<byte> data,
         CancellationToken cancellationToken = default)
     {
-        throw new NotSupportedException(
-            "The linux-gpio backend does not implement I2C register access yet.");
+        return _device.WriteI2cRegisterAsync(Bus.Number, Address.Value, register, data, cancellationToken);
     }
 }
 

@@ -34,6 +34,10 @@ public sealed class AsyncCommand : ICommand
         {
             await _execute(CancellationToken.None).ConfigureAwait(true);
         }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Command failed: {ex.Message}");
+        }
         finally
         {
             _isRunning = false;

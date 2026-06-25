@@ -40,7 +40,14 @@ public sealed class WebSocketTransportConnection : ITransportConnection
 
             do
             {
-                result = await _socket.ReceiveAsync(buffer, cancellationToken).ConfigureAwait(false);
+                try
+                {
+                    result = await _socket.ReceiveAsync(buffer, cancellationToken).ConfigureAwait(false);
+                }
+                catch (WebSocketException ex) when (ex.WebSocketErrorCode == WebSocketError.ConnectionClosedPrematurely)
+                {
+                    yield break;
+                }
 
                 if (result.MessageType == WebSocketMessageType.Close)
                 {
@@ -59,11 +66,16 @@ public sealed class WebSocketTransportConnection : ITransportConnection
     {
         if (_socket.State is WebSocketState.Open or WebSocketState.CloseReceived)
         {
-            await _socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Closing EdgeBridge connection", CancellationToken.None)
-                .ConfigureAwait(false);
+            try
+            {
+                await _socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Closing EdgeBridge connection", CancellationToken.None)
+                    .ConfigureAwait(false);
+            }
+            catch (WebSocketException ex) when (ex.WebSocketErrorCode == WebSocketError.ConnectionClosedPrematurely)
+            {
+            }
         }
 
         _socket.Dispose();
     }
 }
-

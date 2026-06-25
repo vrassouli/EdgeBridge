@@ -49,7 +49,7 @@ Implemented now:
 - mock hardware provider,
 - Linux GPIO hardware backend,
 - configuration-driven Linux GPIO/PWM motor mapping,
-- remote I2C register access contracts with mock support,
+- remote I2C register access contracts with mock and Linux support,
 - camera control/status contracts with mock support,
 - durable Agent config get/update protocol with restart-required semantics,
 - remote client SDK,
@@ -64,7 +64,7 @@ Not implemented yet:
 - authentication/authorization for WebSocket transport,
 - real WiFi/Bluetooth provisioning flows,
 - camera stream transport,
-- real Linux I2C and camera hardware providers,
+- real Linux camera hardware provider,
 - full client-agent integration coverage against a real WebSocket listener.
 
 See [`TODO.md`](TODO.md) for the active roadmap.
@@ -162,6 +162,8 @@ ws://localhost:8080/edgebridge/
 ### 3. Run the all-in-one GUI sample
 
 The Avalonia sample is the primary sample surface. It persists local device profiles, connects to a selected Agent, and exposes dynamic pages for GPIO, PWM, motors, I2C register access, camera control/status, and Agent configuration.
+
+Agent-side command failures must be handled by the GUI as user-visible status messages. A failed remote command, such as an unavailable module, should not crash the app.
 
 ```bash
 dotnet run --project src/EdgeBridge.Samples.Avalonia
@@ -303,6 +305,15 @@ Named motors can be mapped in Agent configuration without changing application c
 
 Negative motor speeds require a configured `directionChannel`. If no direction channel is configured, the motor can only run forward or stop.
 
+When `modules.i2c` is enabled, the `linux-gpio` backend uses Linux I2C device files such as `/dev/i2c-1` for 8-bit register reads and writes. The Agent user must be allowed to access the selected I2C bus, often by membership in the `i2c` group on Raspberry Pi OS:
+
+```bash
+sudo usermod -aG i2c edgebridge
+sudo systemctl restart edgebridge-agent
+```
+
+Use `i2cdetect -l` to list available buses. The current register API uses a single 8-bit register address followed by the read or write payload.
+
 ---
 
 ## Using the Client SDK
@@ -436,7 +447,7 @@ Near-term work:
 - add WebSocket authentication and authorization,
 - implement WiFi/Bluetooth provisioning,
 - add camera stream protocol and transport support,
-- implement real Linux I2C and camera hardware providers,
+- implement a real Linux camera hardware provider,
 - expand client-agent integration tests against a real WebSocket listener,
 - add more ADRs for protocol versioning, transport replacement, and hardware provider model.
 

@@ -107,22 +107,37 @@ static async Task AgentConfigUpdatePersistsAsync()
     try
     {
         var store = await AgentConfigStore.LoadAsync([$"--config={tempPath}"], CancellationToken.None);
-        var result = await store.UpdateAsync(new AgentConfigDto
+        var originalOut = Console.Out;
+        using var logCapture = new StringWriter();
+        Console.SetOut(logCapture);
+
+        AgentConfigUpdateResult result;
+        try
         {
-            DeviceId = "device-2",
-            DeviceName = "Device Two",
-            Modules = new AgentModuleConfigDto { Gpio = true, Pwm = true, I2c = true, Camera = true },
-            Hardware = new AgentHardwareConfigDto
+            result = await store.UpdateAsync(new AgentConfigDto
             {
-                Backend = HardwareBackends.Mock,
-                PwmFrequency = 1000,
-                I2cDevices = [new AgentI2cDeviceConfigDto { Name = "Sensor", Bus = 1, Address = 0x40 }],
-                Cameras = [new AgentCameraConfigDto { CameraId = "camera0", Enabled = true }]
-            }
-        }, CancellationToken.None);
+                DeviceId = "device-2",
+                DeviceName = "Device Two",
+                Modules = new AgentModuleConfigDto { Gpio = true, Pwm = true, I2c = true, Camera = true },
+                Hardware = new AgentHardwareConfigDto
+                {
+                    Backend = HardwareBackends.Mock,
+                    PwmFrequency = 1000,
+                    I2cDevices = [new AgentI2cDeviceConfigDto { Name = "Sensor", Bus = 1, Address = 0x40 }],
+                    Cameras = [new AgentCameraConfigDto { CameraId = "camera0", Enabled = true }]
+                }
+            }, CancellationToken.None);
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+        }
 
         AssertTrue(result.Accepted);
         AssertTrue(result.RestartRequired);
+        AssertContains("Configuration was saved. Restart the Agent for runtime changes to take effect.", result.Message);
+        AssertContains("EdgeBridge Agent configuration updated: Configuration was saved. Restart the Agent for runtime changes to take effect.", logCapture.ToString());
+        AssertContains("EdgeBridge Agent restart required.", logCapture.ToString());
         AssertTrue(File.Exists(tempPath));
 
         var persisted = JsonSerializer.Deserialize<AgentConfig>(
@@ -358,6 +373,14 @@ static void AssertTrue(bool value)
     if (!value)
     {
         throw new InvalidOperationException("Expected true.");
+    }
+}
+
+static void AssertContains(string expected, string actual)
+{
+    if (!actual.Contains(expected, StringComparison.Ordinal))
+    {
+        throw new InvalidOperationException($"Expected '{actual}' to contain '{expected}'.");
     }
 }
 

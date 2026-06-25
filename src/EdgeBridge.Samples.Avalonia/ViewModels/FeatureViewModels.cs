@@ -188,13 +188,24 @@ public sealed class GpioChannelViewModel : ObservableObject
             return;
         }
 
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        var state = await _main.Device
-            .DigitalInput(Channel, new DigitalInputOptions(PullMode))
-            .ReadAsync(timeout.Token)
-            .ConfigureAwait(true);
-        Value = state.IsHigh;
-        Status = $"Read {ValueText} at {state.Timestamp:T}";
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            var state = await _main.Device
+                .DigitalInput(Channel, new DigitalInputOptions(PullMode))
+                .ReadAsync(timeout.Token)
+                .ConfigureAwait(true);
+            Value = state.IsHigh;
+            Status = $"Read {ValueText} at {state.Timestamp:T}";
+        }
+        catch (OperationCanceledException)
+        {
+            Status = "Read timed out";
+        }
+        catch (Exception ex)
+        {
+            Status = $"Read failed: {ex.Message}";
+        }
     }
 
     private async Task WriteOutputValueAsync(bool value)
@@ -531,9 +542,20 @@ public sealed class MotorViewModel : ObservableObject
             return;
         }
 
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        await _main.Device.Motor(Name).SetSpeedAsync(Speed, timeout.Token).ConfigureAwait(true);
-        Status = $"Speed {SpeedPercent}%";
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            await _main.Device.Motor(Name).SetSpeedAsync(Speed, timeout.Token).ConfigureAwait(true);
+            Status = $"Speed {SpeedPercent}%";
+        }
+        catch (OperationCanceledException)
+        {
+            Status = "Motor command timed out";
+        }
+        catch (Exception ex)
+        {
+            Status = $"Motor failed: {ex.Message}";
+        }
     }
 
     private async Task StopAsync()
@@ -543,10 +565,21 @@ public sealed class MotorViewModel : ObservableObject
             return;
         }
 
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        await _main.Device.Motor(Name).StopAsync(timeout.Token).ConfigureAwait(true);
-        Speed = 0;
-        Status = "Stopped";
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            await _main.Device.Motor(Name).StopAsync(timeout.Token).ConfigureAwait(true);
+            Speed = 0;
+            Status = "Stopped";
+        }
+        catch (OperationCanceledException)
+        {
+            Status = "Motor command timed out";
+        }
+        catch (Exception ex)
+        {
+            Status = $"Motor failed: {ex.Message}";
+        }
     }
 
     private async Task RemoveAsync()
@@ -608,26 +641,102 @@ public sealed class I2cDeviceViewModel : ObservableObject
     private readonly DeviceProfile _profile;
     private readonly I2cDeviceProfile _model;
     private string _status = "Idle";
+    private string _busText = "";
+    private string _addressText = "";
+    private string _registerText = "";
+    private string _readLengthText = "";
 
     public I2cDeviceViewModel(MainViewModel main, DeviceProfile profile, I2cDeviceProfile model)
     {
         _main = main;
         _profile = profile;
         _model = model;
+        UpdateValueTextFields();
         ReadCommand = new AsyncCommand(_ => ReadAsync(), () => _main.IsConnected);
         WriteCommand = new AsyncCommand(_ => WriteAsync(), () => _main.IsConnected);
         RemoveCommand = new AsyncCommand(_ => RemoveAsync());
     }
 
+    public I2cValueFormat[] ValueFormats { get; } = [I2cValueFormat.Hex, I2cValueFormat.Decimal];
+
     public string Name { get => _model.Name; set { _model.Name = value; OnPropertyChanged(); _ = _main.SaveProfilesAsync(); } }
+
+    public I2cValueFormat ValueFormat
+    {
+        get => _model.ValueFormat;
+        set
+        {
+            var oldFormat = _model.ValueFormat;
+            if (oldFormat == value)
+            {
+                return;
+            }
+
+            _model.ValueFormat = value;
+            OnPropertyChanged();
+            UpdateValueTextFields();
+            if (TryParseBytes(LastRead, oldFormat, out var lastRead))
+            {
+                LastRead = FormatBytes(lastRead, value);
+            }
+
+            if (TryParseBytes(WriteBytes, oldFormat, out var writeBytes))
+            {
+                _model.WriteBytes = FormatBytes(writeBytes, value);
+                OnPropertyChanged(nameof(WriteBytes));
+            }
+
+            _ = _main.SaveProfilesAsync();
+        }
+    }
 
     public int Bus { get => _model.Bus; set { _model.Bus = value; OnPropertyChanged(); _ = _main.SaveProfilesAsync(); } }
 
+    public string BusText
+    {
+        get => _busText;
+        set
+        {
+            SetProperty(ref _busText, value);
+            TrySetNumber(value, 0, 16, number => _model.Bus = number, nameof(Bus));
+        }
+    }
+
     public int Address { get => _model.Address; set { _model.Address = value; OnPropertyChanged(); _ = _main.SaveProfilesAsync(); } }
+
+    public string AddressText
+    {
+        get => _addressText;
+        set
+        {
+            SetProperty(ref _addressText, value);
+            TrySetNumber(value, 0, 127, number => _model.Address = number, nameof(Address));
+        }
+    }
 
     public int Register { get => _model.Register; set { _model.Register = value; OnPropertyChanged(); _ = _main.SaveProfilesAsync(); } }
 
+    public string RegisterText
+    {
+        get => _registerText;
+        set
+        {
+            SetProperty(ref _registerText, value);
+            TrySetNumber(value, 0, 255, number => _model.Register = number, nameof(Register));
+        }
+    }
+
     public int ReadLength { get => _model.ReadLength; set { _model.ReadLength = Math.Max(1, value); OnPropertyChanged(); _ = _main.SaveProfilesAsync(); } }
+
+    public string ReadLengthText
+    {
+        get => _readLengthText;
+        set
+        {
+            SetProperty(ref _readLengthText, value);
+            TrySetNumber(value, 1, 64, number => _model.ReadLength = number, nameof(ReadLength));
+        }
+    }
 
     public string WriteBytes { get => _model.WriteBytes; set { _model.WriteBytes = value; OnPropertyChanged(); _ = _main.SaveProfilesAsync(); } }
 
@@ -654,10 +763,21 @@ public sealed class I2cDeviceViewModel : ObservableObject
             return;
         }
 
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        var data = await _main.Device.I2cDevice(Bus, Address).ReadRegisterAsync(Register, ReadLength, timeout.Token).ConfigureAwait(true);
-        LastRead = FormatBytes(data);
-        Status = $"Read {data.Length} byte(s)";
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            var data = await _main.Device.I2cDevice(Bus, Address).ReadRegisterAsync(Register, ReadLength, timeout.Token).ConfigureAwait(true);
+            LastRead = FormatBytes(data);
+            Status = $"Read {data.Length} byte(s)";
+        }
+        catch (OperationCanceledException)
+        {
+            Status = "I2C read timed out";
+        }
+        catch (Exception ex)
+        {
+            Status = $"I2C read failed: {ex.Message}";
+        }
     }
 
     private async Task WriteAsync()
@@ -667,10 +787,28 @@ public sealed class I2cDeviceViewModel : ObservableObject
             return;
         }
 
-        var data = ParseBytes(WriteBytes);
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        await _main.Device.I2cDevice(Bus, Address).WriteRegisterAsync(Register, data, timeout.Token).ConfigureAwait(true);
-        Status = $"Wrote {data.Length} byte(s)";
+        if (!TryParseBytes(WriteBytes, ValueFormat, out var data))
+        {
+            Status = ValueFormat == I2cValueFormat.Hex
+                ? "Enter bytes as hex values from 0x00 to 0xFF"
+                : "Enter bytes as decimal values from 0 to 255";
+            return;
+        }
+
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            await _main.Device.I2cDevice(Bus, Address).WriteRegisterAsync(Register, data, timeout.Token).ConfigureAwait(true);
+            Status = $"Wrote {data.Length} byte(s)";
+        }
+        catch (OperationCanceledException)
+        {
+            Status = "I2C write timed out";
+        }
+        catch (Exception ex)
+        {
+            Status = $"I2C write failed: {ex.Message}";
+        }
     }
 
     private async Task RemoveAsync()
@@ -680,21 +818,87 @@ public sealed class I2cDeviceViewModel : ObservableObject
         await _main.SaveProfilesAsync();
     }
 
-    private static byte[] ParseBytes(string text)
+    private void UpdateValueTextFields()
     {
-        var parts = text.Split([' ', ',', ';', '-'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        var bytes = new List<byte>();
-        foreach (var part in parts)
-        {
-            bytes.Add(Convert.ToByte(part.StartsWith("0x", StringComparison.OrdinalIgnoreCase) ? part[2..] : part, 16));
-        }
-
-        return bytes.ToArray();
+        _busText = FormatNumber(_model.Bus);
+        _addressText = FormatNumber(_model.Address);
+        _registerText = FormatNumber(_model.Register);
+        _readLengthText = FormatNumber(_model.ReadLength);
+        OnPropertyChanged(nameof(BusText));
+        OnPropertyChanged(nameof(AddressText));
+        OnPropertyChanged(nameof(RegisterText));
+        OnPropertyChanged(nameof(ReadLengthText));
     }
 
-    private static string FormatBytes(IEnumerable<byte> bytes)
+    private void TrySetNumber(string text, int minimum, int maximum, Action<int> apply, string propertyName)
     {
-        return string.Join(" ", bytes.Select(value => value.ToString("X2")));
+        if (!TryParseNumber(text, out var value) || value < minimum || value > maximum)
+        {
+            Status = $"Enter {propertyName} from {FormatNumber(minimum)} to {FormatNumber(maximum)}";
+            return;
+        }
+
+        apply(value);
+        OnPropertyChanged(propertyName);
+        Status = "Idle";
+        _ = _main.SaveProfilesAsync();
+    }
+
+    private bool TryParseNumber(string text, out int value)
+    {
+        var input = text.Trim();
+        if (input.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+        {
+            return int.TryParse(input[2..], System.Globalization.NumberStyles.HexNumber, null, out value);
+        }
+
+        var numberStyle = ValueFormat == I2cValueFormat.Hex
+            ? System.Globalization.NumberStyles.HexNumber
+            : System.Globalization.NumberStyles.Integer;
+        return int.TryParse(input, numberStyle, null, out value);
+    }
+
+    private string FormatNumber(int value)
+    {
+        return ValueFormat == I2cValueFormat.Hex ? $"0x{value:X2}" : value.ToString();
+    }
+
+    private static bool TryParseBytes(string text, I2cValueFormat valueFormat, out byte[] bytes)
+    {
+        var parts = text.Split([' ', ',', ';', '-'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var parsedBytes = new List<byte>();
+        foreach (var part in parts)
+        {
+            var input = part.StartsWith("0x", StringComparison.OrdinalIgnoreCase) ? part[2..] : part;
+            var fromBase = part.StartsWith("0x", StringComparison.OrdinalIgnoreCase) || valueFormat == I2cValueFormat.Hex ? 16 : 10;
+            try
+            {
+                parsedBytes.Add(Convert.ToByte(input, fromBase));
+            }
+            catch (FormatException)
+            {
+                bytes = [];
+                return false;
+            }
+            catch (OverflowException)
+            {
+                bytes = [];
+                return false;
+            }
+        }
+
+        bytes = parsedBytes.ToArray();
+        return true;
+    }
+
+    private string FormatBytes(IEnumerable<byte> bytes)
+    {
+        return FormatBytes(bytes, ValueFormat);
+    }
+
+    private static string FormatBytes(IEnumerable<byte> bytes, I2cValueFormat valueFormat)
+    {
+        return string.Join(" ", bytes.Select(value => valueFormat == I2cValueFormat.Hex ? $"0x{value:X2}" : value.ToString()));
     }
 }
 
@@ -793,10 +997,21 @@ public sealed class CameraViewModel : ObservableObject
             return;
         }
 
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        await _main.Device.Camera(CameraId).StartStreamAsync(timeout.Token).ConfigureAwait(true);
-        IsStreaming = true;
-        Status = "Started";
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            await _main.Device.Camera(CameraId).StartStreamAsync(timeout.Token).ConfigureAwait(true);
+            IsStreaming = true;
+            Status = "Started";
+        }
+        catch (OperationCanceledException)
+        {
+            Status = "Camera command timed out";
+        }
+        catch (Exception ex)
+        {
+            Status = $"Camera failed: {ex.Message}";
+        }
     }
 
     private async Task StopAsync()
@@ -806,10 +1021,21 @@ public sealed class CameraViewModel : ObservableObject
             return;
         }
 
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        await _main.Device.Camera(CameraId).StopStreamAsync(timeout.Token).ConfigureAwait(true);
-        IsStreaming = false;
-        Status = "Stopped";
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            await _main.Device.Camera(CameraId).StopStreamAsync(timeout.Token).ConfigureAwait(true);
+            IsStreaming = false;
+            Status = "Stopped";
+        }
+        catch (OperationCanceledException)
+        {
+            Status = "Camera command timed out";
+        }
+        catch (Exception ex)
+        {
+            Status = $"Camera failed: {ex.Message}";
+        }
     }
 
     private async Task RefreshAsync()
@@ -819,10 +1045,21 @@ public sealed class CameraViewModel : ObservableObject
             return;
         }
 
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        var state = await _main.Device.Camera(CameraId).GetStatusAsync(timeout.Token).ConfigureAwait(true);
-        IsStreaming = state.IsStreaming;
-        Status = $"Status at {state.Timestamp:T}";
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            var state = await _main.Device.Camera(CameraId).GetStatusAsync(timeout.Token).ConfigureAwait(true);
+            IsStreaming = state.IsStreaming;
+            Status = $"Status at {state.Timestamp:T}";
+        }
+        catch (OperationCanceledException)
+        {
+            Status = "Camera status timed out";
+        }
+        catch (Exception ex)
+        {
+            Status = $"Camera failed: {ex.Message}";
+        }
     }
 
     private async Task RemoveAsync()
@@ -883,11 +1120,22 @@ public sealed class AgentConfigViewModel : ObservableObject
             return;
         }
 
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        var config = await configClient.GetAgentConfigAsync(timeout.Token).ConfigureAwait(true);
-        ConfigJson = JsonSerializer.Serialize(config, ProtocolJson.Options);
-        RestartRequired = false;
-        Status = "Agent configuration loaded.";
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            var config = await configClient.GetAgentConfigAsync(timeout.Token).ConfigureAwait(true);
+            ConfigJson = JsonSerializer.Serialize(config, ProtocolJson.Options);
+            RestartRequired = false;
+            Status = "Agent configuration loaded.";
+        }
+        catch (OperationCanceledException)
+        {
+            Status = "Agent configuration request timed out.";
+        }
+        catch (Exception ex)
+        {
+            Status = $"Agent configuration failed: {ex.Message}";
+        }
     }
 
     private async Task ApplyAsync()
@@ -898,13 +1146,28 @@ public sealed class AgentConfigViewModel : ObservableObject
             return;
         }
 
-        var config = JsonSerializer.Deserialize<AgentConfigDto>(ConfigJson, ProtocolJson.Options)
-            ?? throw new InvalidOperationException("Agent configuration JSON is empty.");
+        try
+        {
+            var config = JsonSerializer.Deserialize<AgentConfigDto>(ConfigJson, ProtocolJson.Options)
+                ?? throw new InvalidOperationException("Agent configuration JSON is empty.");
 
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        var result = await configClient.UpdateAgentConfigAsync(config, timeout.Token).ConfigureAwait(true);
-        ConfigJson = JsonSerializer.Serialize(result.Config, ProtocolJson.Options);
-        RestartRequired = result.RestartRequired;
-        Status = result.Message;
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            var result = await configClient.UpdateAgentConfigAsync(config, timeout.Token).ConfigureAwait(true);
+            ConfigJson = JsonSerializer.Serialize(result.Config, ProtocolJson.Options);
+            RestartRequired = result.RestartRequired;
+            Status = result.Message;
+        }
+        catch (JsonException ex)
+        {
+            Status = $"Invalid configuration JSON: {ex.Message}";
+        }
+        catch (OperationCanceledException)
+        {
+            Status = "Agent configuration update timed out.";
+        }
+        catch (Exception ex)
+        {
+            Status = $"Agent configuration update failed: {ex.Message}";
+        }
     }
 }
