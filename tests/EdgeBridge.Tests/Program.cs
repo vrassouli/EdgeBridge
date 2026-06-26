@@ -85,6 +85,27 @@ static Task ProfileJsonRoundTripsAsync()
                         PullMode = DigitalInputPullMode.PullDown,
                         LastValue = true
                     }
+                },
+                I2cDevices =
+                {
+                    new I2cDeviceProfile
+                    {
+                        Name = "Sensor Read",
+                        Operation = I2cOperation.Read,
+                        Bus = 1,
+                        Address = 0x40,
+                        Register = 0x10,
+                        ReadLength = 2
+                    },
+                    new I2cDeviceProfile
+                    {
+                        Name = "Sensor Write",
+                        Operation = I2cOperation.Write,
+                        Bus = 1,
+                        Address = 0x40,
+                        Register = 0x11,
+                        WriteBytes = "0xAB 0xCD"
+                    }
                 }
             }
         }
@@ -98,6 +119,10 @@ static Task ProfileJsonRoundTripsAsync()
     AssertEqual(GpioDirection.Input, roundTrip?.Devices[0].GpioChannels.Last().Direction);
     AssertEqual(DigitalInputPullMode.PullDown, roundTrip?.Devices[0].GpioChannels.Last().PullMode);
     AssertEqual(true, roundTrip?.Devices[0].GpioChannels.Last().LastValue);
+    AssertEqual(I2cOperation.Read, roundTrip?.Devices[0].I2cDevices[^2].Operation);
+    AssertEqual(2, roundTrip?.Devices[0].I2cDevices[^2].ReadLength);
+    AssertEqual(I2cOperation.Write, roundTrip?.Devices[0].I2cDevices[^1].Operation);
+    AssertEqual("0xAB 0xCD", roundTrip?.Devices[0].I2cDevices[^1].WriteBytes);
     return Task.CompletedTask;
 }
 

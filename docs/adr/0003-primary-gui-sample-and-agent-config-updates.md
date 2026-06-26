@@ -12,6 +12,8 @@ EdgeBridge needs a sample that demonstrates local, remote, and simulated hardwar
 
 The Avalonia sample is the primary sample surface. It uses a professional all-in-one management UI with local JSON profile persistence, dynamic feature pages for implemented capabilities, and shared desktop/mobile view structure.
 
+GPIO and I2C profile rows model direction/operation explicitly. GPIO uses separate input/output rows, and I2C uses separate read/write register rows so read length, write bytes, last-read data, and actions are only shown where they apply.
+
 Agent configuration is exposed through versioned protocol commands:
 
 - `device.config.get`

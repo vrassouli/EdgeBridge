@@ -14,6 +14,10 @@
       <Setter Property="Width" Value="116" />
       <Setter Property="MinWidth" Value="116" />
     </Style>
+    <Style Selector="TextBlock.i2cOperation">
+      <Setter Property="Width" Value="64" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
     <Style Selector="TextBox.i2cBytesField">
       <Setter Property="Width" Value="132" />
       <Setter Property="MinWidth" Value="120" />
@@ -32,9 +36,10 @@
   </UserControl.Styles>
 
   <StackPanel Spacing="16">
-    <Grid ColumnDefinitions="*,Auto">
-      <TextBlock Text="I2C Register Access" Classes="pageTitle" />
-      <Button Grid.Column="1" Content="Add Device" Command="{Binding AddCommand}" Classes="primary" />
+    <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+      <TextBlock Text="I2C Register Rows" Classes="pageTitle" />
+      <Button Grid.Column="1" Content="Add Read" Command="{Binding AddReadCommand}" />
+      <Button Grid.Column="2" Content="Add Write" Command="{Binding AddWriteCommand}" Classes="primary" />
     </Grid>
     <ItemsControl ItemsSource="{Binding Devices}">
       <ItemsControl.ItemTemplate>
@@ -55,6 +60,12 @@
                             Classes="i2cFormatInput" />
                 </StackPanel>
                 <StackPanel Classes="i2cField">
+                  <TextBlock Text="Operation" Classes="i2cLabel" />
+                  <TextBlock Text="{Binding Operation}"
+                             Classes="i2cOperation"
+                             Margin="0,6,0,0" />
+                </StackPanel>
+                <StackPanel Classes="i2cField">
                   <TextBlock Text="Bus" Classes="i2cLabel" />
                   <TextBox Text="{Binding BusText}"
                            Classes="i2cNumberInput" />
@@ -69,18 +80,18 @@
                   <TextBox Text="{Binding RegisterText}"
                            Classes="i2cNumberInput" />
                 </StackPanel>
-                <StackPanel Classes="i2cField">
+                <StackPanel Classes="i2cField" IsVisible="{Binding IsRead}">
                   <TextBlock Text="Read Length" Classes="i2cLabel" />
                   <TextBox Text="{Binding ReadLengthText}"
                            Classes="i2cNumberInput" />
                 </StackPanel>
-                <StackPanel Classes="i2cField">
+                <StackPanel Classes="i2cField" IsVisible="{Binding IsWrite}">
                   <TextBlock Text="Write Bytes" Classes="i2cLabel" />
                   <TextBox Text="{Binding WriteBytes}"
                            Watermark="0x00 0xFF"
                            Classes="i2cBytesField" />
                 </StackPanel>
-                <StackPanel Classes="i2cField">
+                <StackPanel Classes="i2cField" IsVisible="{Binding IsRead}">
                   <TextBlock Text="Last Read" Classes="i2cLabel" />
                   <TextBox Text="{Binding LastRead}"
                            IsReadOnly="True"
@@ -89,11 +100,13 @@
                 </StackPanel>
                 <Button Content="Read"
                         Command="{Binding ReadCommand}"
+                        IsVisible="{Binding IsRead}"
                         Classes="i2cAction"
                         Margin="0,20,10,10"
                         VerticalAlignment="Top" />
                 <Button Content="Write"
                         Command="{Binding WriteCommand}"
+                        IsVisible="{Binding IsWrite}"
                         Classes="primary i2cAction"
                         Margin="0,20,10,10"
                         VerticalAlignment="Top" />

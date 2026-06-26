@@ -35,7 +35,8 @@ public sealed record DeviceProfile
 
     public ObservableCollection<I2cDeviceProfile> I2cDevices { get; init; } =
     [
-        new() { Name = "Sensor", Bus = 1, Address = 0x40, Register = 0, ReadLength = 2 }
+        new() { Name = "Sensor Read", Operation = I2cOperation.Read, Bus = 1, Address = 0x40, Register = 0, ReadLength = 2 },
+        new() { Name = "Sensor Write", Operation = I2cOperation.Write, Bus = 1, Address = 0x40, Register = 0, WriteBytes = "00" }
     ];
 
     public ObservableCollection<CameraProfile> Cameras { get; init; } =
@@ -83,6 +84,8 @@ public sealed record I2cDeviceProfile
 {
     public string Name { get; set; } = "I2C Device";
 
+    public I2cOperation Operation { get; set; }
+
     public I2cValueFormat ValueFormat { get; set; }
 
     public int Bus { get; set; } = 1;
@@ -96,6 +99,12 @@ public sealed record I2cDeviceProfile
     public string WriteBytes { get; set; } = "00";
 
     public string LastRead { get; set; } = "";
+}
+
+public enum I2cOperation
+{
+    Read,
+    Write
 }
 
 public enum I2cValueFormat

@@ -597,12 +597,15 @@ public sealed class I2cFeatureViewModel : ObservableObject
     public I2cFeatureViewModel(MainViewModel main)
     {
         _main = main;
-        AddCommand = new AsyncCommand(_ => AddAsync());
+        AddReadCommand = new AsyncCommand(_ => AddAsync(I2cOperation.Read));
+        AddWriteCommand = new AsyncCommand(_ => AddAsync(I2cOperation.Write));
     }
 
     public ObservableCollection<I2cDeviceViewModel> Devices { get; } = [];
 
-    public AsyncCommand AddCommand { get; }
+    public AsyncCommand AddReadCommand { get; }
+
+    public AsyncCommand AddWriteCommand { get; }
 
     public void Load(DeviceProfile profile)
     {
@@ -621,14 +624,20 @@ public sealed class I2cFeatureViewModel : ObservableObject
         }
     }
 
-    private async Task AddAsync()
+    private async Task AddAsync(I2cOperation operation)
     {
         if (_main.SelectedProfile is null)
         {
             return;
         }
 
-        var device = new I2cDeviceProfile { Name = "I2C Device", Bus = 1, ReadLength = 1 };
+        var device = new I2cDeviceProfile
+        {
+            Name = operation == I2cOperation.Read ? "I2C Read" : "I2C Write",
+            Operation = operation,
+            Bus = 1,
+            ReadLength = 1
+        };
         _main.SelectedProfile.I2cDevices.Add(device);
         Devices.Add(new I2cDeviceViewModel(_main, _main.SelectedProfile, device));
         await _main.SaveProfilesAsync();
@@ -652,14 +661,38 @@ public sealed class I2cDeviceViewModel : ObservableObject
         _profile = profile;
         _model = model;
         UpdateValueTextFields();
-        ReadCommand = new AsyncCommand(_ => ReadAsync(), () => _main.IsConnected);
-        WriteCommand = new AsyncCommand(_ => WriteAsync(), () => _main.IsConnected);
+        ReadCommand = new AsyncCommand(_ => ReadAsync(), () => IsRead && _main.IsConnected);
+        WriteCommand = new AsyncCommand(_ => WriteAsync(), () => IsWrite && _main.IsConnected);
         RemoveCommand = new AsyncCommand(_ => RemoveAsync());
     }
 
     public I2cValueFormat[] ValueFormats { get; } = [I2cValueFormat.Hex, I2cValueFormat.Decimal];
 
     public string Name { get => _model.Name; set { _model.Name = value; OnPropertyChanged(); _ = _main.SaveProfilesAsync(); } }
+
+    public I2cOperation Operation
+    {
+        get => _model.Operation;
+        set
+        {
+            if (_model.Operation == value)
+            {
+                return;
+            }
+
+            _model.Operation = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(IsRead));
+            OnPropertyChanged(nameof(IsWrite));
+            ReadCommand.RaiseCanExecuteChanged();
+            WriteCommand.RaiseCanExecuteChanged();
+            _ = _main.SaveProfilesAsync();
+        }
+    }
+
+    public bool IsRead => Operation == I2cOperation.Read;
+
+    public bool IsWrite => Operation == I2cOperation.Write;
 
     public I2cValueFormat ValueFormat
     {
